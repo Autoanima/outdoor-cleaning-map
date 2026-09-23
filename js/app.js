@@ -827,18 +827,53 @@
   // ── 人員設定：下拉選單，已選的人會從其他選單中剔除 ──
   let students = [], rosterClass = '';
   const rosterHead = extra => `<div class="sheet-head"><div>${extra || ''}<h2 id="sheetTitle">人員設定</h2></div>${closeBtn}</div>`;
+  // 學生名單存在手機上，打開人員設定時直接使用；背景再向雲端確認是否有更新
+  // （Apps Script 久未使用時第一次回應可能要 10–30 秒）
+  const LS_STUDENTS = 'cleanmap.students.v1';
+  let studentList = store.get(LS_STUDENTS, null); // { source, students }
+  let studentsLoading = null;
+  function loadStudents() {
+    return studentsLoading ||= api('getStudents').then(r => {
+      const next = { source: r.source, className: r.className || '', students: r.students };
+      const changed = JSON.stringify(next) !== JSON.stringify(studentList);
+      studentList = next;
+      store.set(LS_STUDENTS, studentList);
+      return changed;
+    }).finally(() => { studentsLoading = null; });
+  }
+  function useStudents() {
+    students = studentList.students;
+    rosterClass = studentList.className || String(studentList.source).replace(/名單.*$/, '').trim();
+  }
   async function openRosterEditor() {
-    openSheet({ kind: 'roster' }, rosterHead() + `<p class="muted">讀取雲端硬碟裡的學生名單中…</p>`);
-    let source = '';
+    if (studentList) {
+      useStudents();
+      renderRosterEditor();
+      // 背景更新：名單有變才重畫選項（已選的不會被清掉）
+      loadStudents().then(changed => {
+        if (!changed || sheetMode?.kind !== 'roster') return;
+        useStudents();
+        renderRosterOptions();
+        const eb = sheetBody.querySelector('.eyebrow');
+        if (eb) eb.textContent = `名單來源：${studentList.source}（${students.length} 人）`;
+        toast('學生名單已更新');
+      }).catch(() => { /* 用手機上的名單即可 */ });
+      return;
+    }
+    openSheet({ kind: 'roster' }, rosterHead() + `<p class="muted">第一次讀取雲端硬碟裡的學生名單中…<br>Google 雲端久未使用時需要 10–30 秒，請稍候。之後就會很快。</p>`);
     try {
-      const r = await api('getStudents');
-      students = r.students; source = r.source;
-      rosterClass = r.className || String(source).replace(/名單.*$/, '').trim();
+      await loadStudents();
     } catch (e) {
       if (sheetMode?.kind === 'roster') sheetBody.innerHTML = rosterHead() + `<p class="lock-msg">無法讀取名單：${esc(e.message)}</p>`;
       return;
     }
     if (sheetMode?.kind !== 'roster') return;
+    useStudents();
+    renderRosterEditor();
+  }
+  function renderRosterEditor() {
+    const source = studentList.source;
+    if (sheetMode?.kind !== 'roster') openSheet({ kind: 'roster' }, '');
     const sel = (key, val) => `<select data-rs="${key}" data-val="${esc(val || '')}" aria-label="選擇同學"></select>`;
     let h = rosterHead(`<div class="eyebrow">名單來源：${esc(source)}（${students.length} 人）</div>`);
     h += `<p class="muted small" style="margin:0">每選一位同學，他就會從其他選單中移除。</p>`;
@@ -1001,6 +1036,8 @@
     started = true;
     flush();
     retryPhotos();
+    // 背景先把學生名單抓好，打開「人員設定」時就不用等
+    setTimeout(() => loadStudents().catch(() => {}), 1500);
   }
   async function fetchRoster(token) {
     const res = await fetch(settings.gasUrl, {
@@ -1041,16 +1078,20 @@
     if (!pw) return lockError('請輸入密碼');
     const btn = $('#lockBtn');
     btn.disabled = true; btn.textContent = '確認中…';
+    const slow = setTimeout(() => { $('#lockMsg').textContent = ''; $('#lockMsg').insertAdjacentHTML('beforeend', '<span class="muted">Google 雲端啟動中，第一次可能需要 10–30 秒…</span>'); }, 4000);
     try {
       applyRoster(await fetchRoster(pw));
       settings.token = pw;
       saveSettings();
       showWhoStep();
     } catch (err) {
+      clearTimeout(slow);
       lockError(err.badToken ? '密碼錯誤' : (err.message === 'Failed to fetch' ? '連不上網路，請確認網路後再試' : err.message));
       $('#lockPw').select();
       btn.textContent = '下一步';
     }
+    clearTimeout(slow);
+    if (!$('#stepWho').hidden) $('#lockMsg').textContent = '';
     btn.disabled = false;
   });
 
