@@ -104,6 +104,11 @@
   const className = () => roster?.jobs?.CLASS?.[0] || '';
   const withClass = name => (name && className() ? `${className()} ${name}` : name);
   const userOptions = () => [D.teacherLabel, ...D.inspectorSlots.map(s => withClass(inspectorName(s.id))).filter(Boolean)];
+  // 檢查範圍：南區／北區檢查人只查自己的區段＋橫跨兩區的水泥平台；導師全部
+  const mySlot = () => D.inspectorSlots.find(s => inspectorName(s.id) && withClass(inspectorName(s.id)) === settings.inspector);
+  const inScope = it => { const sec = mySlot()?.section; return !sec || !it.section || it.section === sec; };
+  const scopeItems = () => D.items.filter(inScope);
+  const scopeName = () => { const sec = mySlot()?.section; return sec ? sectionById[sec].label : ''; };
 
   function applyRoster(r) {
     const next = { jobs: r?.jobs || {}, inspectors: r?.inspectors || {} };
@@ -183,10 +188,12 @@
     let checked = 0, issues = 0;
     D.items.forEach(it => {
       const s = summary(it);
-      if (s.st === 'good' || s.st === 'bad' || s.st === 'absent') checked++;
-      if (s.issue) issues++;
+      const mine = inScope(it);
+      if (mine && (s.st === 'good' || s.st === 'bad' || s.st === 'absent')) checked++;
+      if (mine && s.issue) issues++;
       const el = mapEl.querySelector(`[data-id="${it.id}"]`);
       if (el) {
+        el.classList.toggle('out-scope', !mine);
         el.classList.remove('st-good', 'st-bad', 'st-absent', 'st-partial');
         if (s.st !== 'none') el.classList.add('st-' + s.st);
         el.classList.toggle('is-issue', s.issue);
@@ -205,7 +212,7 @@
         an.innerHTML = h;
       }
     });
-    $('#progress').textContent = `已檢查 ${checked} / ${D.items.length}`;
+    $('#progress').textContent = `${scopeName() ? scopeName() + ' ' : ''}已檢查 ${checked} / ${scopeItems().length}`;
     const chip = $('#issueChip');
     chip.hidden = !issues;
     chip.textContent = `⚠ ${issues} 處有狀況`;
@@ -225,12 +232,14 @@
     const t = e.target.closest('.thumb');
     if (t) { openLightbox(t.dataset.lb, +t.dataset.i); return; }
     const o = e.target.closest('[data-id]');
-    if (o) openItem(o.dataset.id);
+    if (!o) return;
+    if (!inScope(itemById[o.dataset.id])) return toast(`這裡不在你的檢查範圍（你負責${scopeName()}）`);
+    openItem(o.dataset.id);
   });
 
   let issueCursor = -1;
   $('#issueChip').addEventListener('click', () => {
-    const list = D.items.filter(it => summary(it).issue);
+    const list = scopeItems().filter(it => summary(it).issue);
     if (!list.length) return;
     issueCursor = (issueCursor + 1) % list.length;
     const el = mapEl.querySelector(`[data-id="${list[issueCursor].id}"]`);
@@ -625,7 +634,8 @@
     const cnt = { '好': 0, '不好': 0, '未出席': 0 };
     const problems = new Map(); // owner → [{item, st}]
     const issues = [], unchecked = [];
-    D.items.forEach(it => {
+    const items = scopeItems();
+    items.forEach(it => {
       const r = state.records[it.id];
       const missing = [];
       it.owners.forEach(o => {
@@ -640,12 +650,12 @@
       if (missing.length) unchecked.push({ item: it, missing });
       if (r?.issue) issues.push({ item: it, note: r.note, photos: (r.photos || []).filter(p => p.url).map(p => p.url) });
     });
-    const checked = D.items.length - unchecked.length;
+    const checked = items.filter(it => ['good', 'bad', 'absent'].includes(summary(it).st)).length;
     const d = state.startedAt ? new Date(state.startedAt) : new Date();
 
     const L = [];
-    L.push(`【外掃區檢查】${fmtDateW(d)}`);
-    L.push(`檢查 ${checked}/${D.items.length} 處｜好 ${cnt['好']}・不好 ${cnt['不好']}・未出席 ${cnt['未出席']}`);
+    L.push(`【外掃區檢查${scopeName() ? '・' + scopeName() : ''}】${fmtDateW(d)}`);
+    L.push(`檢查 ${checked}/${items.length} 處｜好 ${cnt['好']}・不好 ${cnt['不好']}・未出席 ${cnt['未出席']}`);
     if (problems.size) {
       L.push('', '❌ 需要改進的同學：');
       problems.forEach((arr, o) => L.push(`・${o}：${arr.map(x => `${x.item.full}（${x.st}）`).join('、')}`));
@@ -660,7 +670,7 @@
       });
     }
     if (settings.inspector) L.push('', `檢查人：${settings.inspector}`);
-    return { d, cnt, problems, issues, unchecked, checked, message: L.join('\n') };
+    return { d, total: items.length, cnt, problems, issues, unchecked, checked, message: L.join('\n') };
   }
 
   function openReport() {
@@ -672,7 +682,7 @@
       <div class="tile bad"><b>${R.cnt['不好']}</b><span>不好</span></div>
       <div class="tile absent"><b>${R.cnt['未出席']}</b><span>未出席</span></div>
       <div class="tile issue"><b>${R.issues.length}</b><span>有狀況</span></div></div>`;
-    h += `<p class="muted small" style="margin:4px 0 0">已檢查 ${R.checked} / ${D.items.length} 處</p>`;
+    h += `<p class="muted small" style="margin:4px 0 0">已檢查 ${R.checked} / ${R.total} 處</p>`;
 
     h += `<h3>需要改進的同學</h3>`;
     if (R.problems.size) {
@@ -749,7 +759,7 @@
           report: {
             session: state.sessionId || 'S' + fmtStamp(R.d),
             date: fmtDate(R.d), time: fmtTime(new Date()),
-            checked: R.checked, total: D.items.length,
+            checked: R.checked, total: R.total,
             good: R.cnt['好'], bad: R.cnt['不好'], absent: R.cnt['未出席'], issues: R.issues.length,
             problems: [...R.problems.entries()].map(([o, arr]) => `${o}（${arr.map(x => x.st).join('、')}）`).join('、'),
             inspector: settings.inspector || '', message: msg,
@@ -821,6 +831,7 @@
     settings.inspector = name;
     saveSettings();
     $('#userChip').textContent = '👤 ' + name;
+    if (started) refresh();
   }
   $('#userChip').addEventListener('click', openWho);
 

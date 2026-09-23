@@ -37,11 +37,11 @@ window.MAP_DATA = {
     { name: '警衛室', side: 'W', at: 1080 },
   ],
 
-  // 檢查人：導師 + 每個區段一位
+  // 檢查人：導師（全部）+ 每個區段一位（只檢查自己的區段，以及兩側橫跨南北的水泥平台）
   teacherLabel: '導師',
   inspectorSlots: [
-    { id: 'I1', label: '南區檢查人' },
-    { id: 'I2', label: '北區檢查人' },
+    { id: 'I1', label: '南區檢查人', section: 'S' },
+    { id: 'I2', label: '北區檢查人', section: 'N' },
   ],
 
   jobs: [

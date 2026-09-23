@@ -430,3 +430,7 @@ textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 
 /* LINE 綠色按鈕 */
 .btn--line { background: #06c755; border-color: #06c755; color: #fff; font-size: 17px; }
 .btn--line:active { background: #05a948; }
+
+/* 不在自己檢查範圍的區域：淡化 */
+.obj.out-scope, .sec.out-scope { opacity: .35; filter: grayscale(.7); }
+.sec.out-scope .floor-chip { border-style: dotted; }
