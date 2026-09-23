@@ -36,7 +36,8 @@ function doGet() {
 function doPost(e) {
   try {
     const req = JSON.parse(e.postData.contents);
-    if (String(req.token) !== String(CONFIG.TOKEN)) return json({ ok: false, error: '密碼錯誤', code: 'token' });
+    // 密碼不分大小寫
+    if (String(req.token).trim().toLowerCase() !== String(CONFIG.TOKEN).trim().toLowerCase()) return json({ ok: false, error: '密碼錯誤', code: 'token' });
     switch (req.action) {
       case 'ping': return json(ping());
       case 'getRoster': return json({ ok: true, roster: getRoster() });
