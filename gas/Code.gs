@@ -56,6 +56,7 @@ function setup() {
   getRecordsSheet();
   getSheet(SHEET_ROSTER, HEAD_ROSTER);
   ensureScoreSheet(true);
+  computeScores(); // 先把全班名單列出來
   const folder = getRootFolder();
   Logger.log('完成！照片資料夾：' + folder.getUrl());
 }
@@ -224,10 +225,7 @@ function ensureScoreSheet(withButton) {
     sh.getRange('A7').setValue('最後計算時間');
     sh.getRange('A3:A7').setFontWeight('bold');
     sh.getRange('B3:B6').setBackground('#fff8db');
-    sh.getRange(SCORE_START_ROW - 1, 1, 1, 4).setValues([['同學', '不好次數', '扣分', '不好的日期與處所']])
-      .setFontWeight('bold').setBackground('#ede7fb');
     sh.setFrozenRows(SCORE_START_ROW - 1);
-    sh.setColumnWidth(1, 150); sh.setColumnWidth(4, 420);
   }
   if (withButton && !sh.getImages().length) {
     try {
@@ -263,25 +261,40 @@ function computeScores() {
     s.n++;
     s.list.push({ t: t, text: Utilities.formatDate(d, CONFIG.TIMEZONE, 'M/d') + ' ' + place });
   });
-  const rows = Object.keys(stats)
-    .sort((a, b) => stats[b].n - stats[a].n || a.localeCompare(b))
-    .map(who => {
-      const s = stats[who];
-      const detail = s.list.sort((a, b) => a.t - b.t).map(x => x.text).join('、');
-      return [who, s.n, s.n * per, detail];
-    });
+  // 全班名單（依名單試算表的科別、座號順序），沒有被扣分的也列出來顯示 0
+  let roster = [], className = '';
+  try { const st = getStudents(); roster = st.students; className = st.source.replace(/名單.*$/, ''); } catch (e) { /* 找不到名單時只列有紀錄的同學 */ }
+  Object.keys(stats).forEach(who => { if (roster.indexOf(who) < 0) roster.push(who); });
+  const rows = roster.map(who => {
+    const s = stats[who] || { n: 0, list: [] };
+    const m = who.match(/^(\D*?)(\d+)(.*)$/) || [who, '', '', who];
+    const detail = s.list.sort((a, b) => a.t - b.t).map(x => x.text).join('、');
+    return [m[1], m[2], m[3], s.n, s.n * per, detail];
+  });
 
+  if (className) sh.getRange('A1').setValue('扣分統計（' + className + '）');
+  sh.getRange(SCORE_START_ROW - 1, 1, 1, 6).setValues([['科別', '座號', '姓名', '不好次數', '扣分', '不好的日期與處所']])
+    .setFontWeight('bold').setBackground('#ede7fb');
+  sh.setColumnWidth(1, 50); sh.setColumnWidth(2, 50); sh.setColumnWidth(3, 90); sh.setColumnWidth(6, 420);
   const lr = sh.getLastRow();
-  if (lr >= SCORE_START_ROW) sh.getRange(SCORE_START_ROW, 1, lr - SCORE_START_ROW + 1, 5).clearContent();
+  if (lr >= SCORE_START_ROW) {
+    const old = sh.getRange(SCORE_START_ROW, 1, lr - SCORE_START_ROW + 1, 6);
+    old.clearContent(); old.setBackground(null).setFontColor(null);
+  }
   if (rows.length) {
-    sh.getRange(SCORE_START_ROW, 1, rows.length, 4).setValues(rows).setVerticalAlignment('top');
-    sh.getRange(SCORE_START_ROW, 4, rows.length, 1).setWrap(true);
+    const rg = sh.getRange(SCORE_START_ROW, 1, rows.length, 6);
+    rg.setNumberFormat('@').setValues(rows).setVerticalAlignment('top');
+    sh.getRange(SCORE_START_ROW, 4, rows.length, 2).setNumberFormat('0');
+    sh.getRange(SCORE_START_ROW, 6, rows.length, 1).setWrap(true);
+    // 有扣分的整列標淺紅色，一眼就看得到
+    rows.forEach((r, i) => { if (r[3] > 0) sh.getRange(SCORE_START_ROW + i, 1, 1, 6).setBackground('#fde8e8'); });
   } else {
-    sh.getRange(SCORE_START_ROW, 1).setValue('（這段期間沒有「不好」的紀錄）');
+    sh.getRange(SCORE_START_ROW, 1).setValue('（找不到學生名單，也沒有「不好」的紀錄）');
   }
   sh.getRange('B7').setValue(new Date()).setNumberFormat('yyyy/mm/dd hh:mm');
   sh.getRange('B6').setValue(false);
-  try { ss.toast('已完成扣分加總，共 ' + rows.length + ' 位同學', '外掃檢查', 4); } catch (e) { /* 從網頁呼叫時沒有畫面 */ }
+  const hit = rows.filter(r => r[3] > 0).length;
+  try { ss.toast('已完成扣分加總：全班 ' + rows.length + ' 人，' + hit + ' 人有扣分', '外掃檢查', 4); } catch (e) { /* 從網頁呼叫時沒有畫面 */ }
 }
 
 // ── helpers ──
