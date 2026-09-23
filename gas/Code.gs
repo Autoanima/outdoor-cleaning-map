@@ -259,7 +259,7 @@ function computeScores() {
     seen[k] = true;
     const s = stats[who] || (stats[who] = { n: 0, list: [] });
     s.n++;
-    s.list.push({ t: t, text: Utilities.formatDate(d, CONFIG.TIMEZONE, 'M/d') + ' ' + place });
+    s.list.push({ t: t, day: Utilities.formatDate(d, CONFIG.TIMEZONE, 'M/d') });
   });
   // 全班名單（依名單試算表的科別、座號順序），沒有被扣分的也列出來顯示 0
   let roster = [], className = '';
@@ -268,14 +268,17 @@ function computeScores() {
   const rows = roster.map(who => {
     const s = stats[who] || { n: 0, list: [] };
     const m = who.match(/^(\D*?)(\d+)(.*)$/) || [who, '', '', who];
-    const detail = s.list.sort((a, b) => a.t - b.t).map(x => x.text).join('、');
+    // 只列日期；同一天有好幾處不好就寫成 9/23(2)
+    const days = [], count = {};
+    s.list.sort((a, b) => a.t - b.t).forEach(x => { if (!count[x.day]) days.push(x.day); count[x.day] = (count[x.day] || 0) + 1; });
+    const detail = days.map(dd => (count[dd] > 1 ? dd + '(' + count[dd] + ')' : dd)).join('、');
     return [m[1], m[2], m[3], s.n, s.n * per, detail];
   });
 
   if (className) sh.getRange('A1').setValue('扣分統計（' + className + '）');
-  sh.getRange(SCORE_START_ROW - 1, 1, 1, 6).setValues([['科別', '座號', '姓名', '不好次數', '扣分', '不好的日期與處所']])
+  sh.getRange(SCORE_START_ROW - 1, 1, 1, 6).setValues([['科別', '座號', '姓名', '不好次數', '扣分', '不好的日期']])
     .setFontWeight('bold').setBackground('#ede7fb');
-  sh.setColumnWidth(1, 50); sh.setColumnWidth(2, 50); sh.setColumnWidth(3, 90); sh.setColumnWidth(6, 420);
+  sh.setColumnWidth(1, 50); sh.setColumnWidth(2, 50); sh.setColumnWidth(3, 90); sh.setColumnWidth(6, 300);
   const lr = sh.getLastRow();
   if (lr >= SCORE_START_ROW) {
     const old = sh.getRange(SCORE_START_ROW, 1, lr - SCORE_START_ROW + 1, 6);
