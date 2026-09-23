@@ -100,13 +100,18 @@
   const jobItems = id => D.items.filter(it => it.job === id);
   const jobTitle = id => jobItems(id).map(it => it.full).join('、');
   const inspectorName = slotId => roster?.inspectors?.[slotId] || '';
-  const userOptions = () => [D.teacherLabel, ...D.inspectorSlots.map(s => inspectorName(s.id)).filter(Boolean)];
-  const isTeacher = () => settings.inspector === D.teacherLabel;
+  // 班級存在「工作分配」的 CLASS 列（例如 商一甲）
+  const className = () => roster?.jobs?.CLASS?.[0] || '';
+  const withClass = name => (name && className() ? `${className()} ${name}` : name);
+  const userOptions = () => [D.teacherLabel, ...D.inspectorSlots.map(s => withClass(inspectorName(s.id))).filter(Boolean)];
 
   function applyRoster(r) {
-    roster = { jobs: r?.jobs || {}, inspectors: r?.inspectors || {} };
+    const next = { jobs: r?.jobs || {}, inspectors: r?.inspectors || {} };
+    const changed = JSON.stringify(next) !== JSON.stringify(roster);
+    roster = next;
     store.set(LS.roster, roster);
     D.items.forEach(it => { it.owners = (roster.jobs[it.job] || []).filter(Boolean); });
+    return changed;
   }
 
   function summary(item) {
@@ -147,7 +152,7 @@
       if (i > 0) h += `<div class="sec-divider" style="top:${y(sec.from)}px"></div>`;
       const slot = D.inspectorSlots[i];
       const who = slot && inspectorName(slot.id);
-      const sup = who ? `<span>檢查人<br>${esc(who)}</span>` : '';
+      const sup = who ? `<span>檢查人<br>${className() ? esc(className()) + '<br>' : ''}${esc(who)}</span>` : '';
       h += `<div class="sec-tag ${sec.color}" style="top:${y(sec.from) + 8}px"><b>${esc(sec.label)}</b>${sup}</div>`;
     });
     D.landmarks.forEach(l => { h += `<div class="landmark side-${l.side}" style="top:${y(l.at)}px">${esc(l.name)}</div>`; });
@@ -257,7 +262,7 @@
     let h = `<div class="sheet-head"><div><div class="eyebrow">${esc(item.where)}</div><h2 id="sheetTitle">${esc(item.title)}</h2></div>${closeBtn}</div>`;
     h += `<h3>清潔程度</h3><div class="owners">`;
     if (!item.owners.length) {
-      h += `<p class="empty">尚未指定負責同學。${isTeacher() ? '請到 ⚙ 設定 →「人員設定」選擇。' : '請導師到「人員設定」指定。'}</p>`;
+      h += `<p class="empty">尚未指定負責同學。請到 ⚙ 設定 →「人員設定」選擇。</p>`;
     }
     item.owners.forEach(o => {
       h += `<div class="owner-row"><div class="owner-name">${esc(o)}</div><div class="seg" role="group" aria-label="${esc(o)} 清潔程度">`;
@@ -761,9 +766,7 @@
   // ── 設定 ──
   function openSettings() {
     let h = `<div class="sheet-head"><div><div class="eyebrow">使用人：${esc(settings.inspector || '未選擇')}</div><h2 id="sheetTitle">設定</h2></div>${closeBtn}</div>`;
-    if (isTeacher()) {
-      h += `<div class="actions"><button type="button" class="btn btn--primary wide" data-act="roster">👥 人員設定（掃地工作、檢查人）</button></div>`;
-    }
+    h += `<div class="actions"><button type="button" class="btn btn--primary wide" data-act="roster">👥 人員設定（掃地工作、檢查人）</button></div>`;
     h += `<div class="actions"><button type="button" class="btn wide" data-act="who">👤 切換使用人</button></div>`;
     h += `<h3>本次紀錄</h3><p class="muted small" style="margin:0">${state.startedAt
       ? `開始於 ${fmtDateW(new Date(state.startedAt))} ${fmtTime(new Date(state.startedAt))}，將於 ${Math.round(RESET_MS / 3600e3)} 小時後自動清空。`
@@ -822,7 +825,7 @@
   $('#userChip').addEventListener('click', openWho);
 
   // ── 人員設定：下拉選單，已選的人會從其他選單中剔除 ──
-  let students = [];
+  let students = [], rosterClass = '';
   const rosterHead = extra => `<div class="sheet-head"><div>${extra || ''}<h2 id="sheetTitle">人員設定</h2></div>${closeBtn}</div>`;
   async function openRosterEditor() {
     openSheet({ kind: 'roster' }, rosterHead() + `<p class="muted">讀取雲端硬碟裡的學生名單中…</p>`);
@@ -830,6 +833,7 @@
     try {
       const r = await api('getStudents');
       students = r.students; source = r.source;
+      rosterClass = r.className || String(source).replace(/名單.*$/, '').trim();
     } catch (e) {
       if (sheetMode?.kind === 'roster') sheetBody.innerHTML = rosterHead() + `<p class="lock-msg">無法讀取名單：${esc(e.message)}</p>`;
       return;
@@ -841,7 +845,7 @@
     h += `<h3>檢查人</h3>`;
     h += `<div class="rs-row"><div class="rs-label">${esc(D.teacherLabel)}</div><div class="muted small">固定</div></div>`;
     D.inspectorSlots.forEach(s => {
-      h += `<div class="rs-row"><div class="rs-label">${esc(s.label)}</div><div class="rs-selects">${sel(s.id, inspectorName(s.id))}</div></div>`;
+      h += `<div class="rs-row"><div class="rs-label">${esc(s.label)}${rosterClass ? `（${esc(rosterClass)}）` : ''}</div><div class="rs-selects">${sel(s.id, inspectorName(s.id))}</div></div>`;
     });
     h += `<h3>掃地工作</h3>`;
     D.jobs.forEach(j => {
@@ -878,6 +882,8 @@
     const r = { jobs: {}, inspectors: {}, labels: {} };
     D.inspectorSlots.forEach(s => { r.labels[s.id] = s.label; r.inspectors[s.id] = ''; });
     D.jobs.forEach(j => { r.labels[j.id] = jobTitle(j.id); r.jobs[j.id] = Array(j.slots).fill(''); });
+    r.labels.CLASS = '班級';
+    r.jobs.CLASS = [rosterClass || className()];
     const sels = [...sheetBody.querySelectorAll('select[data-rs]')];
     sels.forEach(s => {
       const [id, i] = s.dataset.rs.split(':');
@@ -891,6 +897,7 @@
       const res = await api('saveRoster', { roster: r });
       applyRoster(res.roster);
       buildMap(); refresh();
+      ensureUserValid();
       toast('✓ 人員設定已儲存');
       closeSheet();
     } catch (e) {
@@ -944,6 +951,32 @@
       setTimeout(() => toast('✓ 已更新到最新版本'), 800);
     }
   } catch { /* ignore */ }
+
+  // ── 人員設定同步：任何一人按「儲存到雲端」後，其他手機切回 App 或每 2 分鐘自動更新 ──
+  let rosterSyncing = false, lastRosterSync = 0;
+  async function syncRoster(announce) {
+    if (rosterSyncing || !settings.token || !navigator.onLine) return;
+    rosterSyncing = true; lastRosterSync = Date.now();
+    try {
+      if (applyRoster(await fetchRoster(settings.token))) {
+        buildMap(); refresh();
+        if (sheetMode?.kind === 'item') rerenderItem(sheetMode.id);
+        if (announce) toast('人員設定已更新');
+        ensureUserValid();
+      }
+    } catch (err) {
+      if (err.badToken) { settings.token = ''; saveSettings(); location.reload(); }
+    } finally { rosterSyncing = false; }
+  }
+  // 若自己的名字被換掉，請重新選擇使用人
+  function ensureUserValid() {
+    if (started && !userOptions().includes(settings.inspector)) {
+      toast('人員設定已變更，請重新選擇使用人');
+      openWho();
+    }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && started) syncRoster(true); });
+  setInterval(() => { if (!document.hidden && started && Date.now() - lastRosterSync > 2 * 60e3) syncRoster(true); }, 30e3);
 
   // ── Toast ──
   let toastTimer;
@@ -1026,12 +1059,7 @@
       // 登入過：先用手機上的名單開啟，再到雲端更新
       applyRoster(roster);
       start();
-      try {
-        applyRoster(await fetchRoster(settings.token));
-        buildMap(); refresh();
-      } catch (err) {
-        if (err.badToken) { settings.token = ''; saveSettings(); location.reload(); }
-      }
+      syncRoster();
       return;
     }
     $('#lockPw').focus();
