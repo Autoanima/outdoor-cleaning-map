@@ -8,7 +8,21 @@
   const STATUSES = ['好', '不好', '未出席'];
   const ST_CLASS = { '好': 'good', '不好': 'bad', '未出席': 'absent' };
   const BADGE = { good: '✓', bad: '✕', absent: '缺', partial: '…' };
-  const LS = { state: 'cleanmap.state.v2', settings: 'cleanmap.settings.v1', queue: 'cleanmap.queue.v1', roster: 'cleanmap.roster.v1' };
+  // 測試模式：密碼輸入 test。使用示範名單，資料另外存放，不會寫入雲端、不能改名單、不能傳送通知
+  const LS_MODE = 'cleanmap.mode.v1';
+  const TEST = (() => { try { return localStorage.getItem(LS_MODE) === 'test'; } catch { return false; } })();
+  const SFX = TEST ? '.test' : '';
+  const LS = { state: 'cleanmap.state.v2' + SFX, settings: 'cleanmap.settings.v1' + SFX, queue: 'cleanmap.queue.v1' + SFX, roster: 'cleanmap.roster.v1' + SFX };
+  const DEMO_STUDENTS = ['示01王小明', '示02李小華', '示03陳大同', '示04林美美', '示05張志明', '示06黃雅婷', '示07吳建宏', '示08劉怡君',
+    '示09蔡宗翰', '示10楊佳穎', '示11許文豪', '示12鄭淑芬', '示13謝承恩', '示14郭品妍', '示15洪家豪', '示16曾詩涵', '示17周子傑', '示18葉芷晴'];
+  const DEMO_ROSTER = {
+    inspectors: { I1: '示15洪家豪', I2: '示16曾詩涵' },
+    jobs: {
+      J01: ['示01王小明'], J02: ['示02李小華'], J03: ['示03陳大同'], J04: ['示04林美美'], J05: ['示05張志明'],
+      J06: ['示06黃雅婷', '示07吳建宏'], J07: ['示08劉怡君'], J08: ['示09蔡宗翰'], J09: ['示10楊佳穎'], J10: ['示11許文豪'],
+      J11: ['示12鄭淑芬'], J12: ['示13謝承恩', '示14郭品妍'], CLASS: ['示範班'],
+    },
+  };
 
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -27,7 +41,7 @@
   const idb = (() => {
     let dbp;
     const open = () => dbp ||= new Promise((res, rej) => {
-      const r = indexedDB.open('cleanmap', 1);
+      const r = indexedDB.open('cleanmap' + SFX, 1);
       r.onupgradeneeded = () => r.result.createObjectStore('photos');
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
@@ -295,6 +309,7 @@
         if (p.st === 'uploading') st = `<span class="st">上傳中…</span>`;
         else if (p.st === 'error') st = `<button type="button" class="st err" data-act="retry" data-pid="${p.id}">重試上傳</button>`;
         else if (p.st === 'local') st = `<span class="st">僅存手機</span>`;
+        else if (p.st === 'test') st = `<span class="st">測試・未上傳</span>`;
         h += `<div class="photo-cell"><button type="button" class="open" data-act="view" data-i="${i}" aria-label="放大照片"><img src="${p.thumb}" alt=""></button>${st}<button type="button" class="del" data-act="delphoto" data-pid="${p.id}" aria-label="移除照片">✕</button></div>`;
       });
       h += `</div>`;
@@ -438,11 +453,11 @@
       const pid = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
       try { await idb.put(pid, full); } catch { /* 無 IndexedDB 時只保留小圖 */ }
       ensureSession();
-      rec(itemId).photos.push({ id: pid, thumb, st: settings.gasUrl ? 'uploading' : 'local' });
+      rec(itemId).photos.push({ id: pid, thumb, st: TEST ? 'test' : settings.gasUrl ? 'uploading' : 'local' });
       touch(item);
       rerenderItem(itemId);
       toast(`已壓縮為 ${Math.round(full.size / 1024)} KB`);
-      if (settings.gasUrl) uploadPhoto(itemId, pid, full);
+      if (settings.gasUrl && !TEST) uploadPhoto(itemId, pid, full);
     } catch (err) {
       toast('照片處理失敗：' + err.message);
     }
@@ -479,7 +494,7 @@
     rerenderItem(itemId);
   }
   function retryPhotos() {
-    if (!settings.gasUrl || !navigator.onLine) return;
+    if (TEST || !settings.gasUrl || !navigator.onLine) return;
     D.items.forEach(it => (state.records[it.id]?.photos || []).forEach(p => {
       if (p.st !== 'done') uploadPhoto(it.id, p.id);
     }));
@@ -535,7 +550,17 @@
   });
 
   // ── 雲端同步（Google Apps Script）──
+  // 測試模式：不連雲端，模擬回應
+  async function testApi(action) {
+    await new Promise(r => setTimeout(r, 300));
+    if (action === 'getStudents') return { ok: true, source: '示範班名單', students: DEMO_STUDENTS };
+    if (action === 'getRoster') return { ok: true, roster: DEMO_ROSTER };
+    if (action === 'saveRoster') throw new Error('測試模式不能修改名單');
+    if (action === 'uploadPhoto') throw new Error('測試模式不會上傳照片');
+    return { ok: true, sheetName: '（測試模式）', sheetUrl: '' };
+  }
   async function api(action, payload = {}) {
+    if (TEST) return testApi(action);
     if (!settings.gasUrl) throw new Error('尚未設定雲端網址');
     const res = await fetch(settings.gasUrl, {
       method: 'POST',
@@ -705,10 +730,10 @@
     }
     h += `<h3>通知訊息（可修改）</h3><textarea id="msgText">${esc(R.message)}</textarea>`;
     h += `<div class="actions">
-      <button type="button" class="btn btn--line wide" data-act="share">傳送 LINE 通知</button>
+      <button type="button" class="btn btn--line wide" data-act="share"${TEST ? ' disabled' : ''}>${TEST ? '🧪 測試模式不能傳送 LINE 通知' : '傳送 LINE 通知'}</button>
       <button type="button" class="btn wide" data-act="copy">📋 複製訊息</button>
     </div>
-    <p id="saveStatus" class="muted small">按下「傳送 LINE 通知」時，會同時把「不好」的紀錄寫入 Google 試算表。</p>`;
+    <p id="saveStatus" class="muted small">${TEST ? '測試模式：訊息只能預覽，不會送出，也不會寫入試算表。' : '按下「傳送 LINE 通知」時，會同時把「不好」的紀錄寫入 Google 試算表。'}</p>`;
     openSheet({ kind: 'report', R }, h);
     flush();
   }
@@ -731,6 +756,7 @@
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setTimeout(() => openItem(b.dataset.id), 450);
     } else if (act === 'share') {
+      if (TEST) return toast('測試模式不能傳送 LINE 通知');
       // 先開分享（必須在點擊當下呼叫），同時在背景寫入試算表
       const saving = saveReportToSheet(R, msg);
       if (navigator.share) {
@@ -801,6 +827,7 @@
     } else if (act === 'who') {
       openWho();
     } else if (act === 'lock') {
+      if (TEST) return exitTest();
       settings.token = ''; settings.inspector = '';
       saveSettings();
       location.reload();
@@ -832,7 +859,7 @@
   const rosterHead = extra => `<div class="sheet-head"><div>${extra || ''}<h2 id="sheetTitle">人員設定</h2></div>${closeBtn}</div>`;
   // 學生名單存在手機上，打開人員設定時直接使用；背景再向雲端確認是否有更新
   // （Apps Script 久未使用時第一次回應可能要 10–30 秒）
-  const LS_STUDENTS = 'cleanmap.students.v1';
+  const LS_STUDENTS = 'cleanmap.students.v1' + SFX;
   let studentList = store.get(LS_STUDENTS, null); // { source, students }
   let studentsLoading = null;
   function loadStudents() {
@@ -892,7 +919,9 @@
       for (let i = 0; i < j.slots; i++) h += sel(`${j.id}:${i}`, cur[i]);
       h += `</div></div>`;
     });
-    h += `<div class="save-bar"><button type="button" class="btn btn--primary" data-act="rosterSave">儲存到雲端</button></div>`;
+    h += TEST
+      ? `<div class="save-bar"><button type="button" class="btn" disabled>🧪 測試模式不能修改名單</button></div>`
+      : `<div class="save-bar"><button type="button" class="btn btn--primary" data-act="rosterSave">儲存到雲端</button></div>`;
     sheetBody.innerHTML = h;
     renderRosterOptions();
   }
@@ -1043,6 +1072,7 @@
     setTimeout(() => loadStudents().catch(() => {}), 1500);
   }
   async function fetchRoster(token) {
+    if (TEST) return DEMO_ROSTER;
     const res = await fetch(settings.gasUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -1079,6 +1109,11 @@
     }
     const pw = $('#lockPw').value.trim();
     if (!pw) return lockError('請輸入密碼');
+    if (pw.toLowerCase() === 'test') {
+      try { localStorage.setItem(LS_MODE, 'test'); } catch { /* ignore */ }
+      location.reload();
+      return;
+    }
     const btn = $('#lockBtn');
     btn.disabled = true; btn.textContent = '確認中…';
     const slow = setTimeout(() => { $('#lockMsg').textContent = ''; $('#lockMsg').insertAdjacentHTML('beforeend', '<span class="muted">Google 雲端啟動中，第一次可能需要 10–30 秒…</span>'); }, 4000);
@@ -1098,7 +1133,33 @@
     btn.disabled = false;
   });
 
+  // ── 測試模式：上方橫幅＋結束按鈕 ──
+  function exitTest() {
+    try {
+      localStorage.removeItem(LS_MODE);
+      Object.values(LS).concat(LS_STUDENTS).forEach(k => localStorage.removeItem(k));
+      indexedDB.deleteDatabase('cleanmap' + SFX);
+    } catch { /* ignore */ }
+    location.reload();
+  }
+  if (TEST) {
+    document.body.classList.add('test-mode');
+    const bar = document.createElement('div');
+    bar.className = 'test-banner';
+    bar.innerHTML = '<span>🧪 測試模式：示範名單，資料不會送出</span><button type="button">結束測試</button>';
+    bar.querySelector('button').addEventListener('click', () => { if (confirm('結束測試模式？測試時的紀錄會全部清除。')) exitTest(); });
+    document.body.prepend(bar);
+    $('.lock-card h1').textContent = '外掃區檢查（測試模式）';
+  }
+
   (async () => {
+    if (TEST) {
+      settings.token = 'test';
+      applyRoster(DEMO_ROSTER);
+      if (settings.inspector && userOptions().includes(settings.inspector)) start();
+      else showWhoStep();
+      return;
+    }
     if (settings.token && settings.inspector && roster) {
       // 登入過：先用手機上的名單開啟，再到雲端更新
       applyRoster(roster);

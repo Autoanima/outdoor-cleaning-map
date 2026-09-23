@@ -434,3 +434,13 @@ textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 
 /* 不在自己檢查範圍的區域：淡化 */
 .obj.out-scope, .sec.out-scope { opacity: .35; filter: grayscale(.7); }
 .sec.out-scope .floor-chip { border-style: dotted; }
+
+/* 測試模式 */
+.test-banner {
+  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: #fff3bf; color: #7a5a00; font-size: 13px; font-weight: 700;
+  padding: calc(env(safe-area-inset-top) + 6px) 12px 6px; border-bottom: 1px solid #f5d565;
+}
+.test-banner button { border: 1px solid #d9b22b; background: #fff; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; color: #7a5a00; }
+body.test-mode .topbar { top: 34px; padding-top: 8px; }
+body.locked.test-mode .test-banner { display: flex !important; position: fixed; left: 0; right: 0; }
