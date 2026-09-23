@@ -13,16 +13,9 @@
   const TEST = (() => { try { return localStorage.getItem(LS_MODE) === 'test'; } catch { return false; } })();
   const SFX = TEST ? '.test' : '';
   const LS = { state: 'cleanmap.state.v2' + SFX, settings: 'cleanmap.settings.v1' + SFX, queue: 'cleanmap.queue.v1' + SFX, roster: 'cleanmap.roster.v1' + SFX };
-  const DEMO_STUDENTS = ['示01王小明', '示02李小華', '示03陳大同', '示04林美美', '示05張志明', '示06黃雅婷', '示07吳建宏', '示08劉怡君',
-    '示09蔡宗翰', '示10楊佳穎', '示11許文豪', '示12鄭淑芬', '示13謝承恩', '示14郭品妍', '示15洪家豪', '示16曾詩涵', '示17周子傑', '示18葉芷晴'];
-  const DEMO_ROSTER = {
-    inspectors: { I1: '示15洪家豪', I2: '示16曾詩涵' },
-    jobs: {
-      J01: ['示01王小明'], J02: ['示02李小華'], J03: ['示03陳大同'], J04: ['示04林美美'], J05: ['示05張志明'],
-      J06: ['示06黃雅婷', '示07吳建宏'], J07: ['示08劉怡君'], J08: ['示09蔡宗翰'], J09: ['示10楊佳穎'], J10: ['示11許文豪'],
-      J11: ['示12鄭淑芬'], J12: ['示13謝承恩', '示14郭品妍'], CLASS: ['示範班'],
-    },
-  };
+  // 測試模式用的名單：姓名中間以○遮住（去識別化），GitHub 上不會出現完整姓名
+  const DEMO_STUDENTS = ["多01杜○昊", "多02林○廷", "多03邱○家", "多04陳○方", "多05曾○瑄", "多06謝○翰", "多07呂○晏", "多09林○岳", "多10柯○伶", "多11張○珮", "多12張○讌", "多13陳○頎", "多14廖○涵", "多15趙○昀", "多16歐○晴", "多17歐○曦", "多18賴○瞳", "多19羅○倚", "料01方○聖", "料02吳○祐", "料03張○愷", "料04許○皓", "料05鄒○軒", "料06朱○潔", "料07李○慧", "料08李○萱", "料09林○廷", "料10張○寧", "料11張○葳", "料12張○敏", "料13陳○靚", "料14陳○芊", "料15陳○琳", "料16陳○微", "料17陳○婷", "料18陳○澖", "料19彭○晴", "料20葉○芸", "料21趙○釩", "料22劉○琪", "料23蔡○芳", "料24繆○恬", "料25蘇○妮", "料26蘇○莙"];
+  const DEMO_ROSTER = {"inspectors": {"I1": "料26蘇○莙", "I2": "料10張○寧"}, "jobs": {"J01": ["料15陳○琳"], "J02": ["料18陳○澖"], "J03": ["料04許○皓"], "J04": ["料21趙○釩"], "J05": ["料03張○愷"], "J06": ["料19彭○晴", "料14陳○芊"], "J07": ["多18賴○瞳"], "J08": ["料24繆○恬"], "J09": ["多17歐○曦"], "J10": ["多07呂○晏"], "J11": ["料23蔡○芳"], "J12": ["多01杜○昊", "料12張○敏"], "CLASS": ["商一甲"]}};
 
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -553,7 +546,7 @@
   // 測試模式：不連雲端，模擬回應
   async function testApi(action) {
     await new Promise(r => setTimeout(r, 300));
-    if (action === 'getStudents') return { ok: true, source: '示範班名單', students: DEMO_STUDENTS };
+    if (action === 'getStudents') return { ok: true, source: '商一甲名單（測試・去識別化）', className: '商一甲', students: DEMO_STUDENTS };
     if (action === 'getRoster') return { ok: true, roster: DEMO_ROSTER };
     if (action === 'saveRoster') throw new Error('測試模式不能修改名單');
     if (action === 'uploadPhoto') throw new Error('測試模式不會上傳照片');
@@ -1146,7 +1139,7 @@
     document.body.classList.add('test-mode');
     const bar = document.createElement('div');
     bar.className = 'test-banner';
-    bar.innerHTML = '<span>🧪 測試模式：示範名單，資料不會送出</span><button type="button">結束測試</button>';
+    bar.innerHTML = '<span>🧪 測試模式：姓名已去識別化，資料不會送出</span><button type="button">結束測試</button>';
     bar.querySelector('button').addEventListener('click', () => { if (confirm('結束測試模式？測試時的紀錄會全部清除。')) exitTest(); });
     document.body.prepend(bar);
     $('.lock-card h1').textContent = '外掃區檢查（測試模式）';
