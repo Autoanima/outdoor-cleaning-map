@@ -60,9 +60,11 @@ window.MAP_DATA = {
   ],
 
   items: [
-    // ── 兩側紫色長條：水泥平台 ──
-    { id: 'P-E', type: 'platform', side: 'strip-E', job: 'J02' },
-    { id: 'P-W', type: 'platform', side: 'strip-W', job: 'J08' },
+    // ── 兩側紫色長條：水泥平台（在南北區交界切成兩半，各區檢查自己那一半；打掃仍是同一位同學）──
+    { id: 'P-E-S', type: 'platform', side: 'strip-E', section: 'S', job: 'J02' },
+    { id: 'P-W-S', type: 'platform', side: 'strip-W', section: 'S', job: 'J08' },
+    { id: 'P-E-N', type: 'platform', side: 'strip-E', section: 'N', job: 'J02' },
+    { id: 'P-W-N', type: 'platform', side: 'strip-W', section: 'N', job: 'J08' },
 
     // ── 南區 ──
     { id: 'S-glass-w1', type: 'glass', side: 'W', from: 115, to: 200, section: 'S', job: 'J01' },

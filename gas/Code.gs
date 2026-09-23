@@ -3,26 +3,29 @@
  * ------------------------------------------------------------
  * 1. 在 Google 試算表中：擴充功能 → Apps Script，把這整份貼上。
  * 2. 修改下方 CONFIG（TOKEN 就是網頁的開啟密碼）。
- * 3. 執行一次 setup()（授權後會建立工作表與雲端資料夾）。
+ * 3. 執行一次 setup()（授權後會建立工作表、扣分統計與按鈕）。
  * 4. 部署 → 新增部署作業 → 類型「網頁應用程式」
  *      執行身分：我　／　誰可以存取：所有人
- *    複製「網頁應用程式網址」（…/exec）貼到網站的 ⚙ 設定。
+ *    複製「網頁應用程式網址」（…/exec）填到網站的 config.js。
  * 修改程式後要「管理部署作業 → 編輯 → 版本：新版本」才會生效。
+ *
+ * 試算表只記錄「不好」的處所：日期、處所、負責同學、說明、照片（可點開）。
+ * 「扣分統計」工作表按「計算扣分」按鈕（或勾選方塊）即可加總每位同學的扣分。
  */
 const CONFIG = {
   TOKEN: '請改成你的密碼',              // 網頁的開啟密碼（只改你 Apps Script 裡的這份，不要改 GitHub 上的）
   SHEET_ID: '',                        // 留空 = 使用這份試算表（綁定在試算表上的腳本）
-  FOLDER_NAME: '外掃檢查照片',          // 雲端硬碟中存放照片的資料夾
-  SHARE_PHOTOS: true,                  // 照片設為「知道連結的人可檢視」，網頁才能顯示大圖
-  NOTIFY_EMAILS: '',                   // 報表寄送對象，多個用逗號分隔，例如 'a@school.edu.tw,b@gmail.com'
+  FOLDER_NAME: '外掃檢查照片',          // 雲端硬碟中存放照片與學生名單的資料夾
+  SHARE_PHOTOS: true,                  // 照片設為「知道連結的人可檢視」，點連結才能直接看
   TIMEZONE: 'Asia/Taipei',
+  BUTTON_IMAGE: 'https://autoanima.github.io/outdoor-cleaning-map/assets/sum-button.png',
 };
 
 const SHEET_RECORDS = '檢查紀錄';
-const HEAD_RECORDS = ['紀錄編號', '日期', '區域', '項目', '同學', '清潔程度', '狀況', '狀況說明', '照片', '檢查人', '更新時間'];
-const SHEET_REPORTS = '每日彙整';
-const HEAD_REPORTS = ['場次', '日期', '彙整時間', '已檢查', '總數', '好', '不好', '未出席', '有狀況', '需改進同學', '檢查人', '通知訊息'];
-const SHEET_STATS = '個人統計';
+const HEAD_RECORDS = ['日期', '處所', '負責同學', '說明', '照片', '檢查人', '紀錄編號'];
+const COL_PHOTO = 5, COL_KEY = 7;
+const SHEET_SCORE = '扣分統計';
+const SCORE_START_ROW = 10;
 const SHEET_ROSTER = '工作分配';
 const HEAD_ROSTER = ['代號', '工作內容', '負責人1', '負責人2'];
 
@@ -41,8 +44,6 @@ function doPost(e) {
       case 'getStudents': return json(getStudents());
       case 'saveRecords': return json(saveRecords(req.rows || []));
       case 'uploadPhoto': return json(uploadPhoto(req));
-      case 'saveReport': return json(saveReport(req.report || {}));
-      case 'notify': return json(notify(req));
       default: return json({ ok: false, error: '未知的動作：' + req.action });
     }
   } catch (err) {
@@ -50,22 +51,25 @@ function doPost(e) {
   }
 }
 
-/** 第一次使用時手動執行：建立工作表、統計表與照片資料夾 */
+/** 第一次使用（或更新程式後）手動執行一次：建立工作表、扣分統計與按鈕 */
 function setup() {
-  getSheet(SHEET_RECORDS, HEAD_RECORDS);
-  getSheet(SHEET_REPORTS, HEAD_REPORTS);
+  getRecordsSheet();
   getSheet(SHEET_ROSTER, HEAD_ROSTER);
-  const ss = getSS();
-  let st = ss.getSheetByName(SHEET_STATS);
-  if (!st) {
-    st = ss.insertSheet(SHEET_STATS);
-    st.getRange('A1').setValue('依同學統計每種清潔程度的次數（自動更新，可作為加扣分依據）');
-    st.getRange('A3').setFormula(
-      "=IFERROR(QUERY('" + SHEET_RECORDS + "'!A:K,\"select E, count(A) where F is not null and F <> '' group by E pivot F\",1),\"尚無資料\")");
-    st.setFrozenRows(3);
-  }
+  ensureScoreSheet(true);
   const folder = getRootFolder();
   Logger.log('完成！照片資料夾：' + folder.getUrl());
+}
+
+/** 試算表選單：外掃檢查 → 計算扣分 */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('外掃檢查').addItem('計算扣分', 'computeScores').addToUi();
+}
+
+/** 手機上的 Google 試算表 App 按不到圖片按鈕，所以也可以勾選「扣分統計」B6 的方塊來計算 */
+function onEdit(e) {
+  const r = e && e.range;
+  if (!r || r.getSheet().getName() !== SHEET_SCORE || r.getA1Notation() !== 'B6') return;
+  if (r.getValue() === true) computeScores();
 }
 
 function ping() {
@@ -134,33 +138,60 @@ function getStudents() {
   return { ok: true, source: file.getName(), students: students };
 }
 
+// ── 檢查紀錄：只保留「不好」；改成其他狀態時會自動刪掉那一列 ──
 function saveRecords(rows) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    const sh = getSheet(SHEET_RECORDS, HEAD_RECORDS);
+    const sh = getRecordsSheet();
     const last = sh.getLastRow();
-    const keys = last > 1 ? sh.getRange(2, 1, last - 1, 1).getValues().map(r => String(r[0])) : [];
+    const keys = last > 1 ? sh.getRange(2, COL_KEY, last - 1, 1).getValues().map(r => String(r[0])) : [];
     const index = new Map(keys.map((k, i) => [k, i + 2]));
-    const appends = [];
+    const updates = [], deletes = [], appends = new Map();
     rows.forEach(r => {
-      const vals = [
-        r.key, r.date, r.section, r.item, r.owner, r.status || '',
-        r.issue ? '有狀況' : '', r.note || '', r.photos || '', r.inspector || '',
-        r.updatedAt ? new Date(r.updatedAt) : new Date(),
-      ];
       const row = index.get(r.key);
-      if (row > 0) sh.getRange(row, 1, 1, vals.length).setValues([vals]);
-      else if (row < 0) appends[-row - 1] = vals;       // 同一批重複的 key
-      else { appends.push(vals); index.set(r.key, -appends.length); }
+      if (r.status !== '不好') {
+        if (row) deletes.push(row);
+        appends.delete(r.key);
+        return;
+      }
+      const note = (r.issue ? '【有狀況】' : '') + (r.note || '');
+      const vals = [toDate(r.date), r.item, r.owner, note, '', r.inspector || '', r.key];
+      if (row) updates.push({ row: row, vals: vals, photos: r.photos });
+      else appends.set(r.key, { vals: vals, photos: r.photos });
     });
-    if (appends.length) {
-      sh.getRange(sh.getLastRow() + 1, 1, appends.length, HEAD_RECORDS.length).setValues(appends);
+    updates.forEach(u => {
+      sh.getRange(u.row, 1, 1, u.vals.length).setValues([u.vals]);
+      sh.getRange(u.row, COL_PHOTO).setRichTextValue(photoLinks(u.photos));
+    });
+    if (deletes.length) {
+      if (sh.getMaxRows() - deletes.length < 2) sh.insertRowsAfter(sh.getMaxRows(), deletes.length);
+      deletes.sort((a, b) => b - a).forEach(r => sh.deleteRow(r));
+    }
+    if (appends.size) {
+      const list = Array.from(appends.values());
+      const start = sh.getLastRow() + 1;
+      sh.getRange(start, 1, list.length, HEAD_RECORDS.length).setValues(list.map(x => x.vals));
+      list.forEach((x, i) => sh.getRange(start + i, COL_PHOTO).setRichTextValue(photoLinks(x.photos)));
+      sh.getRange(start, 1, list.length, 1).setNumberFormat('yyyy/mm/dd');
     }
     return { ok: true, saved: rows.length };
   } finally {
     lock.releaseLock();
   }
+}
+
+/** 把多個照片網址變成可點的「照片1、照片2…」（同一格、分行） */
+function photoLinks(urls) {
+  const list = String(urls || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const b = SpreadsheetApp.newRichTextValue().setText(list.map((_, i) => '照片' + (i + 1)).join('\n'));
+  let pos = 0;
+  list.forEach((u, i) => {
+    const t = '照片' + (i + 1);
+    b.setLinkUrl(pos, pos + t.length, u);
+    pos += t.length + 1;
+  });
+  return b.build();
 }
 
 function uploadPhoto(req) {
@@ -175,28 +206,82 @@ function uploadPhoto(req) {
   return { ok: true, id: file.getId(), url: file.getUrl() };
 }
 
-function saveReport(r) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
-  try {
-    const sh = getSheet(SHEET_REPORTS, HEAD_REPORTS);
-    const vals = [r.session, r.date, r.time, r.checked, r.total, r.good, r.bad, r.absent, r.issues, r.problems, r.inspector, r.message];
-    const last = sh.getLastRow();
-    const keys = last > 1 ? sh.getRange(2, 1, last - 1, 1).getValues().map(x => String(x[0])) : [];
-    const i = keys.indexOf(String(r.session));
-    if (i >= 0) sh.getRange(i + 2, 1, 1, vals.length).setValues([vals]);
-    else sh.appendRow(vals);
-    return { ok: true };
-  } finally {
-    lock.releaseLock();
+// ── 扣分統計 ──
+function ensureScoreSheet(withButton) {
+  const ss = getSS();
+  let sh = ss.getSheetByName(SHEET_SCORE);
+  const isNew = !sh;
+  if (isNew) sh = ss.insertSheet(SHEET_SCORE, 0);
+  if (isNew) {
+    sh.getRange('A1').setValue('扣分統計').setFontSize(16).setFontWeight('bold');
+    sh.getRange('A2').setValue('依「檢查紀錄」加總每位同學「不好」的次數。按右邊的按鈕，或勾選 B6，就會重新計算。').setFontColor('#6b7079');
+    sh.getRange('A3:C3').setValues([['每次「不好」扣', 1, '分']]);
+    sh.getRange('A4:C4').setValues([['起始日期', '', '（空白＝不限）']]);
+    sh.getRange('A5:C5').setValues([['結束日期', '', '（空白＝不限）']]);
+    sh.getRange('B4:B5').setNumberFormat('yyyy/mm/dd');
+    sh.getRange('A6').setValue('勾選即計算');
+    sh.getRange('B6').insertCheckboxes();
+    sh.getRange('A7').setValue('最後計算時間');
+    sh.getRange('A3:A7').setFontWeight('bold');
+    sh.getRange('B3:B6').setBackground('#fff8db');
+    sh.getRange(SCORE_START_ROW - 1, 1, 1, 4).setValues([['同學', '不好次數', '扣分', '不好的日期與處所']])
+      .setFontWeight('bold').setBackground('#ede7fb');
+    sh.setFrozenRows(SCORE_START_ROW - 1);
+    sh.setColumnWidth(1, 150); sh.setColumnWidth(4, 420);
   }
+  if (withButton && !sh.getImages().length) {
+    try {
+      sh.insertImage(CONFIG.BUTTON_IMAGE, 4, 3).setWidth(180).setHeight(48).assignScript('computeScores');
+    } catch (e) { Logger.log('按鈕圖片建立失敗，可改用選單「外掃檢查 → 計算扣分」：' + e); }
+  }
+  return sh;
 }
 
-function notify(req) {
-  const to = String(CONFIG.NOTIFY_EMAILS || '').trim();
-  if (!to) throw new Error('Code.gs 的 NOTIFY_EMAILS 尚未設定收件者');
-  MailApp.sendEmail({ to: to, subject: req.subject || '外掃區檢查', body: req.body || '' });
-  return { ok: true, to: to };
+function computeScores() {
+  const ss = getSS();
+  const sh = ensureScoreSheet(false);
+  const per = Number(sh.getRange('B3').getValue()) || 1;
+  const from = sh.getRange('B4').getValue(), to = sh.getRange('B5').getValue();
+  const fromT = from instanceof Date ? new Date(from.getFullYear(), from.getMonth(), from.getDate()).getTime() : -Infinity;
+  const toT = to instanceof Date ? new Date(to.getFullYear(), to.getMonth(), to.getDate(), 23, 59, 59).getTime() : Infinity;
+
+  const rec = getRecordsSheet();
+  const last = rec.getLastRow();
+  const data = last > 1 ? rec.getRange(2, 1, last - 1, 3).getValues() : [];
+  const seen = {}, stats = {};
+  data.forEach(r => {
+    const d = r[0] instanceof Date ? r[0] : new Date(r[0]);
+    const place = String(r[1]), who = String(r[2]).trim();
+    if (!who || isNaN(d)) return;
+    const t = d.getTime();
+    if (t < fromT || t > toT) return;
+    // 同一天、同一處、同一人只算一次（避免導師與檢查人重複記錄）
+    const k = Utilities.formatDate(d, CONFIG.TIMEZONE, 'yyyyMMdd') + '|' + place + '|' + who;
+    if (seen[k]) return;
+    seen[k] = true;
+    const s = stats[who] || (stats[who] = { n: 0, list: [] });
+    s.n++;
+    s.list.push({ t: t, text: Utilities.formatDate(d, CONFIG.TIMEZONE, 'M/d') + ' ' + place });
+  });
+  const rows = Object.keys(stats)
+    .sort((a, b) => stats[b].n - stats[a].n || a.localeCompare(b))
+    .map(who => {
+      const s = stats[who];
+      const detail = s.list.sort((a, b) => a.t - b.t).map(x => x.text).join('、');
+      return [who, s.n, s.n * per, detail];
+    });
+
+  const lr = sh.getLastRow();
+  if (lr >= SCORE_START_ROW) sh.getRange(SCORE_START_ROW, 1, lr - SCORE_START_ROW + 1, 5).clearContent();
+  if (rows.length) {
+    sh.getRange(SCORE_START_ROW, 1, rows.length, 4).setValues(rows).setVerticalAlignment('top');
+    sh.getRange(SCORE_START_ROW, 4, rows.length, 1).setWrap(true);
+  } else {
+    sh.getRange(SCORE_START_ROW, 1).setValue('（這段期間沒有「不好」的紀錄）');
+  }
+  sh.getRange('B7').setValue(new Date()).setNumberFormat('yyyy/mm/dd hh:mm');
+  sh.getRange('B6').setValue(false);
+  try { ss.toast('已完成扣分加總，共 ' + rows.length + ' 位同學', '外掃檢查', 4); } catch (e) { /* 從網頁呼叫時沒有畫面 */ }
 }
 
 // ── helpers ──
@@ -213,6 +298,26 @@ function getSheet(name, head) {
     sh.setFrozenRows(1);
   }
   return sh;
+}
+
+/** 「檢查紀錄」若還是舊版格式，改名保留，再建立新的 */
+function getRecordsSheet() {
+  const ss = getSS();
+  let sh = ss.getSheetByName(SHEET_RECORDS);
+  if (sh && String(sh.getRange(1, 1).getValue()) !== HEAD_RECORDS[0]) {
+    sh.setName(SHEET_RECORDS + '（舊版）' + Utilities.formatDate(new Date(), CONFIG.TIMEZONE, 'MMdd-HHmm'));
+    sh = null;
+  }
+  if (!sh) {
+    sh = getSheet(SHEET_RECORDS, HEAD_RECORDS);
+    sh.hideColumns(COL_KEY);
+    sh.setColumnWidth(2, 130); sh.setColumnWidth(3, 120); sh.setColumnWidth(4, 280);
+  }
+  return sh;
+}
+
+function toDate(s) {
+  try { return Utilities.parseDate(String(s), CONFIG.TIMEZONE, 'yyyy/MM/dd'); } catch (e) { return new Date(); }
 }
 
 function getRootFolder() {

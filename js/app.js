@@ -78,7 +78,7 @@
     D.items.forEach(it => {
       const sec = sectionById[it.section];
       if (it.type === 'floor') { it.from = sec.from; it.to = sec.to; it.chipAt ??= (sec.from + sec.to) / 2; }
-      if (it.side.startsWith('strip')) { it.from = 0; it.to = D.length; }
+      if (it.side.startsWith('strip')) { it.from = sec ? sec.from : 0; it.to = sec ? sec.to : D.length; }
       it.name = it.name || D.typeNames[it.type] || it.type;
       it.owners = [];
       (groups[it.type] ||= []).push(it);
@@ -104,7 +104,7 @@
   const className = () => roster?.jobs?.CLASS?.[0] || '';
   const withClass = name => (name && className() ? `${className()} ${name}` : name);
   const userOptions = () => [D.teacherLabel, ...D.inspectorSlots.map(s => withClass(inspectorName(s.id))).filter(Boolean)];
-  // 檢查範圍：南區／北區檢查人只查自己的區段＋橫跨兩區的水泥平台；導師全部
+  // 檢查範圍：南區／北區檢查人只查自己區段內的物件（水泥平台也切成南北兩半）；導師全部
   const mySlot = () => D.inspectorSlots.find(s => inspectorName(s.id) && withClass(inspectorName(s.id)) === settings.inspector);
   const inScope = it => { const sec = mySlot()?.section; return !sec || !it.section || it.section === sec; };
   const scopeItems = () => D.items.filter(inScope);
@@ -165,10 +165,12 @@
     D.items.forEach(it => {
       const strip = it.side.startsWith('strip');
       if (it.type !== 'floor') {
-        h += `<button type="button" class="obj obj--${it.type} side-${it.side}${it.double ? ' double' : ''}" data-id="${it.id}" aria-label="${esc(it.full)}" style="top:${y(it.from)}px;height:${(it.to - it.from) * K}px">`;
+        // 水泥平台在南北交界切開，中間留一點空隙
+        const gapT = strip && it.from > 0 ? 3 : 0, gapB = strip && it.to < D.length ? 3 : 0;
+        h += `<button type="button" class="obj obj--${it.type} side-${it.side}${it.double ? ' double' : ''}" data-id="${it.id}" aria-label="${esc(it.full)}" style="top:${y(it.from) + gapT}px;height:${(it.to - it.from) * K - gapT - gapB}px">`;
         if (strip) {
-          // 長條平台上每隔一段標一次名稱
-          [0.12, 0.42, 0.62, 0.9].forEach(f => { h += `<span class="obj-label" style="top:${f * 100}%">${esc(it.name + it.no)}</span>`; });
+          // 長條平台上標兩次名稱
+          [0.22, 0.75].forEach(f => { h += `<span class="obj-label" style="top:${f * 100}%">${esc(it.name + it.no)}</span>`; });
         } else {
           h += `<span class="obj-label">${esc(it.name + it.no)}</span>`;
         }
@@ -176,7 +178,7 @@
       }
       let top;
       if (it.type === 'floor') top = y(it.chipAt) + 22;
-      else if (strip) top = y(it.side === 'strip-E' ? 50 : 90);
+      else if (strip) top = y(it.from + (it.side === 'strip-E' ? 50 : 105));
       else top = y((it.from + it.to) / 2);
       const side = strip ? it.side.slice(-1) : it.side;
       h += `<div class="annex annex-${side}" data-annex="${it.id}" style="top:${top}px"></div>`;
@@ -706,7 +708,7 @@
       <button type="button" class="btn btn--line wide" data-act="share">傳送 LINE 通知</button>
       <button type="button" class="btn wide" data-act="copy">📋 複製訊息</button>
     </div>
-    <p id="saveStatus" class="muted small">按下「傳送 LINE 通知」時，會同時寫入 Google 試算表。</p>`;
+    <p id="saveStatus" class="muted small">按下「傳送 LINE 通知」時，會同時把「不好」的紀錄寫入 Google 試算表。</p>`;
     openSheet({ kind: 'report', R }, h);
     flush();
   }
@@ -755,17 +757,7 @@
           if (syncError) break;
         }
         if (queue.length) throw new Error(syncError || '仍有紀錄未寫入，請稍後再試');
-        await api('saveReport', {
-          report: {
-            session: state.sessionId || 'S' + fmtStamp(R.d),
-            date: fmtDate(R.d), time: fmtTime(new Date()),
-            checked: R.checked, total: R.total,
-            good: R.cnt['好'], bad: R.cnt['不好'], absent: R.cnt['未出席'], issues: R.issues.length,
-            problems: [...R.problems.entries()].map(([o, arr]) => `${o}（${arr.map(x => x.st).join('、')}）`).join('、'),
-            inspector: settings.inspector || '', message: msg,
-          },
-        });
-        say('✓ 已寫入 Google 試算表');
+        say('✓ 「不好」的紀錄都已寫入 Google 試算表');
       } catch (e) {
         say('✕ 寫入試算表失敗：' + e.message);
         toast('寫入試算表失敗：' + e.message);
