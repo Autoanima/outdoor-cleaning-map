@@ -37,7 +37,8 @@ function doPost(e) {
   try {
     const req = JSON.parse(e.postData.contents);
     // 密碼不分大小寫
-    if (String(req.token).trim().toLowerCase() !== String(CONFIG.TOKEN).trim().toLowerCase()) return json({ ok: false, error: '密碼錯誤', code: 'token' });
+    const norm = x => String(x).normalize('NFKC').replace(/\s+/g, '').toLowerCase(); // 不分大小寫、全形半形
+    if (norm(req.token) !== norm(CONFIG.TOKEN)) return json({ ok: false, error: '密碼錯誤', code: 'token' });
     switch (req.action) {
       case 'ping': return json(ping());
       case 'getRoster': return json({ ok: true, roster: getRoster() });

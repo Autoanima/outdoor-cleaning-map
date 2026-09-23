@@ -1100,7 +1100,8 @@
       start();
       return;
     }
-    const pw = $('#lockPw').value.trim();
+    // 全形轉半形（中文輸入法打出的「１１０」「ｔｅｓｔ」也能用），並去掉空白
+    const pw = $('#lockPw').value.normalize('NFKC').replace(/\s+/g, '');
     if (!pw) return lockError('請輸入密碼');
     if (pw.toLowerCase() === 'test') {
       try { localStorage.setItem(LS_MODE, 'test'); } catch { /* ignore */ }
