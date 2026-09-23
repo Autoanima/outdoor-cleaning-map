@@ -909,6 +909,42 @@
     }
   });
 
+  // ── 自動更新：切回 App 或每 10 分鐘檢查 GitHub 上的檔案有沒有變，有就重新載入 ──
+  // （從主畫面開啟的 App 常常只是從背景叫回，不會重新載入，所以要自己檢查）
+  const WATCH = ['index.html', 'config.js', 'js/map-data.js', 'js/app.js', 'css/style.css'];
+  async function fingerprint() {
+    try {
+      const tags = await Promise.all(WATCH.map(async u => {
+        const r = await fetch(u, { method: 'HEAD', cache: 'no-store' });
+        if (!r.ok) throw new Error(r.status);
+        return r.headers.get('etag') || r.headers.get('last-modified') || '';
+      }));
+      return tags.join('|');
+    } catch { return null; }
+  }
+  let fp0 = null, lastCheck = 0;
+  fingerprint().then(f => { fp0 = f; lastCheck = Date.now(); });
+  async function checkUpdate() {
+    if (!fp0 || !navigator.onLine || Date.now() - lastCheck < 30e3) return;
+    lastCheck = Date.now();
+    const f = await fingerprint();
+    if (!f || f === fp0) return;
+    // 正在填寫或看照片時先不打斷，下次再更新
+    if (!sheet.hidden || !lb.el.hidden) return;
+    commitNote();
+    try { sessionStorage.setItem('cleanmap.updated', '1'); } catch { /* ignore */ }
+    location.reload();
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
+  window.addEventListener('pageshow', e => { if (e.persisted) checkUpdate(); });
+  setInterval(() => { if (!document.hidden && Date.now() - lastCheck > 10 * 60e3) checkUpdate(); }, 60e3);
+  try {
+    if (sessionStorage.getItem('cleanmap.updated')) {
+      sessionStorage.removeItem('cleanmap.updated');
+      setTimeout(() => toast('✓ 已更新到最新版本'), 800);
+    }
+  } catch { /* ignore */ }
+
   // ── Toast ──
   let toastTimer;
   function toast(msg) {
