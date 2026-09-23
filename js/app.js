@@ -8,7 +8,7 @@
   const STATUSES = ['好', '不好', '未出席'];
   const ST_CLASS = { '好': 'good', '不好': 'bad', '未出席': 'absent' };
   const BADGE = { good: '✓', bad: '✕', absent: '缺', partial: '…' };
-  const LS = { state: 'cleanmap.state.v1', settings: 'cleanmap.settings.v1', queue: 'cleanmap.queue.v1' };
+  const LS = { state: 'cleanmap.state.v2', settings: 'cleanmap.settings.v1', queue: 'cleanmap.queue.v1', roster: 'cleanmap.roster.v1' };
 
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -49,7 +49,11 @@
     };
   })();
 
-  let settings = Object.assign({ gasUrl: '', token: '', inspector: '' }, { gasUrl: CFG.gasUrl || '' }, store.get(LS.settings, {}));
+  let settings = Object.assign({ gasUrl: '', token: '', inspector: '' }, store.get(LS.settings, {}));
+  settings.gasUrl ||= CFG.gasUrl || '';
+  const saveSettings = () => store.set(LS.settings, settings);
+  // 人員分配（從雲端「工作分配」工作表讀取，手機上留一份快取）
+  let roster = store.get(LS.roster, null);
   const emptyState = () => ({ sessionId: null, startedAt: null, records: {} });
   let state = Object.assign(emptyState(), store.get(LS.state, {}));
   let queue = store.get(LS.queue, []);
@@ -67,27 +71,43 @@
 
   // ── 物件名稱（同區同側同類有多個時自動編號）──
   const sectionById = Object.fromEntries(D.sections.map(s => [s.id, s]));
-  const SIDE_NAME = { W: '西側', E: '東側', 'out-W': '西側牆外', floor: '' };
+  const SIDE_NAME = { W: '西側', E: '東側', 'strip-W': '西側', 'strip-E': '東側', floor: '' };
   const itemById = {};
   (() => {
     const groups = {};
     D.items.forEach(it => {
       const sec = sectionById[it.section];
       if (it.type === 'floor') { it.from = sec.from; it.to = sec.to; it.chipAt ??= (sec.from + sec.to) / 2; }
+      if (it.side.startsWith('strip')) { it.from = 0; it.to = D.length; }
       it.name = it.name || D.typeNames[it.type] || it.type;
-      (groups[`${it.section}|${it.side}|${it.type}`] ||= []).push(it);
+      it.owners = [];
+      (groups[it.type] ||= []).push(it);
       itemById[it.id] = it;
     });
+    // 同一種物件由南到北編號：公佈欄玻璃 1、2、3…（同位置時東側在前）
+    const sideRank = s => (s.endsWith('E') ? 0 : 1);
     Object.values(groups).forEach(arr => {
-      arr.sort((a, b) => a.from - b.from);
+      arr.sort((a, b) => a.from - b.from || sideRank(a.side) - sideRank(b.side));
       arr.forEach((it, i) => {
         const sec = sectionById[it.section];
-        it.title = it.name + (arr.length > 1 ? ' ' + '①②③④⑤⑥⑦⑧⑨'[i] : '');
-        it.where = sec.label + (SIDE_NAME[it.side] ? '・' + SIDE_NAME[it.side] : '');
-        it.full = `${it.where} ${it.title}`;
+        it.no = arr.length > 1 ? i + 1 : '';
+        it.title = it.no ? `${it.name} ${it.no}` : it.name;
+        it.where = [sec?.label, SIDE_NAME[it.side]].filter(Boolean).join('・');
+        it.full = it.title;
       });
     });
   })();
+  const jobItems = id => D.items.filter(it => it.job === id);
+  const jobTitle = id => jobItems(id).map(it => it.full).join('、');
+  const inspectorName = slotId => roster?.inspectors?.[slotId] || '';
+  const userOptions = () => [D.teacherLabel, ...D.inspectorSlots.map(s => inspectorName(s.id)).filter(Boolean)];
+  const isTeacher = () => settings.inspector === D.teacherLabel;
+
+  function applyRoster(r) {
+    roster = { jobs: r?.jobs || {}, inspectors: r?.inspectors || {} };
+    store.set(LS.roster, roster);
+    D.items.forEach(it => { it.owners = (roster.jobs[it.job] || []).filter(Boolean); });
+  }
 
   function summary(item) {
     const r = state.records[item.id];
@@ -111,8 +131,10 @@
     const total = D.length;
     mapEl.style.height = (PAD_T + total * K + PAD_B) + 'px';
     let h = '';
-    h += `<div class="side-label side-E" style="top:4px">東側<small>司令台側</small></div>`;
-    h += `<div class="side-label side-W" style="top:4px">西側<small>警衛室側</small></div>`;
+    ['E', 'W'].forEach(s => {
+      const sd = D.sides?.[s] || { name: SIDE_NAME[s] };
+      h += `<div class="side-label side-${s}" style="top:4px">${esc(sd.name)}<small>${esc(sd.note || '')}</small></div>`;
+    });
     h += `<div class="edge-label" style="top:${PAD_T - 24}px">▲ 南</div>`;
     h += `<div class="edge-label" style="top:${y(total) + 6}px">▼ 北</div>`;
 
@@ -120,27 +142,34 @@
       const floor = D.items.find(it => it.type === 'floor' && it.section === sec.id);
       const attrs = floor ? `data-id="${floor.id}" aria-label="${esc(floor.full)}"` : 'tabindex="-1"';
       h += `<button type="button" class="sec sec--${sec.color}" ${attrs} style="top:${y(sec.from)}px;height:${(sec.to - sec.from) * K}px">`;
-      if (floor) h += `<span class="floor-chip" style="top:${(floor.chipAt - sec.from) * K}px">🧹 ${esc(floor.name)}<span class="badge"></span></span>`;
+      if (floor) h += `<span class="floor-chip" style="top:${(floor.chipAt - sec.from) * K}px">🧹 ${esc(floor.title)}<span class="badge"></span></span>`;
       h += `</button>`;
       if (i > 0) h += `<div class="sec-divider" style="top:${y(sec.from)}px"></div>`;
-      const sup = sec.supervisor ? `<span>${esc(sec.supervisor).replace(' ', '<br>')}</span>` : '';
+      const slot = D.inspectorSlots[i];
+      const who = slot && inspectorName(slot.id);
+      const sup = who ? `<span>檢查人<br>${esc(who)}</span>` : '';
       h += `<div class="sec-tag ${sec.color}" style="top:${y(sec.from) + 8}px"><b>${esc(sec.label)}</b>${sup}</div>`;
     });
-    h += `<div class="wall wall-E" style="top:${y(0)}px;height:${total * K}px"></div>`;
-    h += `<div class="wall wall-W" style="top:${y(0)}px;height:${total * K}px"></div>`;
     D.landmarks.forEach(l => { h += `<div class="landmark side-${l.side}" style="top:${y(l.at)}px">${esc(l.name)}</div>`; });
 
     D.items.forEach(it => {
+      const strip = it.side.startsWith('strip');
       if (it.type !== 'floor') {
         h += `<button type="button" class="obj obj--${it.type} side-${it.side}${it.double ? ' double' : ''}" data-id="${it.id}" aria-label="${esc(it.full)}" style="top:${y(it.from)}px;height:${(it.to - it.from) * K}px">`;
-        if (it.type === 'platform') h += '平台';
+        if (strip) {
+          // 長條平台上每隔一段標一次名稱
+          [0.12, 0.42, 0.62, 0.9].forEach(f => { h += `<span class="obj-label" style="top:${f * 100}%">${esc(it.name + it.no)}</span>`; });
+        } else {
+          h += `<span class="obj-label">${esc(it.name + it.no)}</span>`;
+        }
         h += `<span class="badge"></span></button>`;
       }
-      let top, cls = it.side;
+      let top;
       if (it.type === 'floor') top = y(it.chipAt) + 22;
-      else if (it.side === 'out-W') top = y(it.to) + 6;
+      else if (strip) top = y(it.side === 'strip-E' ? 50 : 90);
       else top = y((it.from + it.to) / 2);
-      h += `<div class="annex annex-${cls}" data-annex="${it.id}" style="top:${top}px"></div>`;
+      const side = strip ? it.side.slice(-1) : it.side;
+      h += `<div class="annex annex-${side}" data-annex="${it.id}" style="top:${top}px"></div>`;
     });
     mapEl.innerHTML = h;
   }
@@ -227,6 +256,9 @@
     const r = state.records[item.id] || { status: {}, issue: false, note: '', photos: [] };
     let h = `<div class="sheet-head"><div><div class="eyebrow">${esc(item.where)}</div><h2 id="sheetTitle">${esc(item.title)}</h2></div>${closeBtn}</div>`;
     h += `<h3>清潔程度</h3><div class="owners">`;
+    if (!item.owners.length) {
+      h += `<p class="empty">尚未指定負責同學。${isTeacher() ? '請到 ⚙ 設定 →「人員設定」選擇。' : '請導師到「人員設定」指定。'}</p>`;
+    }
     item.owners.forEach(o => {
       h += `<div class="owner-row"><div class="owner-name">${esc(o)}</div><div class="seg" role="group" aria-label="${esc(o)} 清潔程度">`;
       STATUSES.forEach(s => {
@@ -304,12 +336,6 @@
       if (r.issue) setTimeout(() => $('#noteInput')?.focus(), 50);
       commitNote();
       touch(item);
-    }
-    if (e.target.dataset.set) {
-      settings[e.target.dataset.set] = e.target.value.trim();
-      store.set(LS.settings, settings);
-      updateSync();
-      if (e.target.dataset.set !== 'inspector') { scheduleFlush(300); retryPhotos(); }
     }
   });
 
@@ -514,7 +540,7 @@
       key: `${state.sessionId}|${item.id}|${owner}`,
       session: state.sessionId,
       date: fmtDate(new Date(state.startedAt)),
-      section: sectionById[item.section].label,
+      section: sectionById[item.section]?.label || SIDE_NAME[item.side] || '',
       item: item.full,
       owner,
       status: r.status[owner] || '',
@@ -628,11 +654,7 @@
         x.photos.forEach(u => L.push(`  照片 ${u}`));
       });
     }
-    if (unchecked.length) {
-      L.push('', '（尚未檢查：' + unchecked.map(x => x.item.full).join('、') + '）');
-    }
-    const sups = D.sections.map(s => s.supervisor).filter(Boolean);
-    if (sups.length) L.push('', '監督：' + sups.join('、'));
+    if (settings.inspector) L.push('', `檢查人：${settings.inspector}`);
     return { d, cnt, problems, issues, unchecked, checked, message: L.join('\n') };
   }
 
@@ -664,22 +686,12 @@
       });
       h += `</ul>`;
     }
-    if (R.unchecked.length) {
-      h += `<h3>尚未檢查</h3><ul class="rlist">`;
-      R.unchecked.forEach(x => {
-        h += `<li><button type="button" class="link-btn" data-act="goto" data-id="${x.item.id}">${esc(x.item.full)}</button><div class="what">${esc(x.missing.join('、'))}</div></li>`;
-      });
-      h += `</ul>`;
-    }
-
     h += `<h3>通知訊息（可修改）</h3><textarea id="msgText">${esc(R.message)}</textarea>`;
     h += `<div class="actions">
-      <button type="button" class="btn btn--primary wide" data-act="share">📤 傳送通知（LINE 等）</button>
-      <button type="button" class="btn" data-act="copy">📋 複製訊息</button>
-      <button type="button" class="btn" data-act="email"${settings.gasUrl ? '' : ' disabled'}>✉️ 寄 Email</button>
-      <button type="button" class="btn wide" data-act="saveReport"${settings.gasUrl ? '' : ' disabled'}>📊 寫入 Google 試算表</button>
-    </div>`;
-    if (!settings.gasUrl) h += `<p class="muted small">尚未設定雲端，無法寫入試算表或寄信。請按右上角 ⚙ 設定。</p>`;
+      <button type="button" class="btn btn--line wide" data-act="share">傳送 LINE 通知</button>
+      <button type="button" class="btn wide" data-act="copy">📋 複製訊息</button>
+    </div>
+    <p id="saveStatus" class="muted small">按下「傳送 LINE 通知」時，會同時寫入 Google 試算表。</p>`;
     openSheet({ kind: 'report', R }, h);
     flush();
   }
@@ -702,19 +714,23 @@
       el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       setTimeout(() => openItem(b.dataset.id), 450);
     } else if (act === 'share') {
+      // 先開分享（必須在點擊當下呼叫），同時在背景寫入試算表
+      const saving = saveReportToSheet(R, msg);
       if (navigator.share) {
-        try { await navigator.share({ text: msg }); } catch (e) { if (e.name !== 'AbortError') toast('無法分享：' + e.message); }
+        navigator.share({ text: msg }).catch(e => { if (e.name !== 'AbortError') toast('無法分享：' + e.message); });
       } else if (await copyText(msg)) toast('已複製，請貼到 LINE 群組');
+      await saving;
     } else if (act === 'copy') {
       toast(await copyText(msg) ? '已複製訊息' : '複製失敗，請手動選取');
-    } else if (act === 'email') {
-      if (!confirm('要把這份報表寄到 Apps Script 裡設定的收件信箱嗎？')) return;
-      b.disabled = true;
-      try { const r = await api('notify', { subject: `外掃區檢查 ${fmtDateW(R.d)}`, body: msg }); toast(`已寄出給 ${r.to}`); }
-      catch (e) { toast('寄信失敗：' + e.message); }
-      b.disabled = false;
-    } else if (act === 'saveReport') {
-      b.disabled = true; b.textContent = '寫入中…';
+    }
+  }
+
+  async function saveReportToSheet(R, msg) {
+    const st = $('#saveStatus');
+    const say = t => { if (st) st.textContent = t; };
+    if (!settings.gasUrl) { say('尚未設定雲端，沒有寫入試算表。'); return; }
+    say('寫入 Google 試算表中…');
+    {
       try {
         D.items.forEach(it => { if (state.records[it.id]) enqueue(rowsFor(it)); });
         clearTimeout(flushTimer);
@@ -734,44 +750,39 @@
             inspector: settings.inspector || '', message: msg,
           },
         });
-        toast('✓ 已寫入 Google 試算表');
-        b.textContent = '✓ 已寫入試算表';
+        say('✓ 已寫入 Google 試算表');
       } catch (e) {
-        toast('寫入失敗：' + e.message);
-        b.textContent = '📊 寫入 Google 試算表';
+        say('✕ 寫入試算表失敗：' + e.message);
+        toast('寫入試算表失敗：' + e.message);
       }
-      b.disabled = false;
     }
   }
 
   // ── 設定 ──
   function openSettings() {
-    let h = `<div class="sheet-head"><div><div class="eyebrow">只會存在這支手機</div><h2 id="sheetTitle">設定</h2></div>${closeBtn}</div>`;
-    h += `<div class="field"><label for="setUrl">雲端網址（Apps Script /exec）</label>
-      <input type="url" id="setUrl" data-set="gasUrl" value="${esc(settings.gasUrl)}" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
-      <div class="hint">設定方式見 GitHub 上的 README。未設定時，紀錄與照片只存在這支手機。</div></div>`;
-    h += `<div class="field"><label for="setToken">通關密碼</label>
-      <input type="password" id="setToken" data-set="token" value="${esc(settings.token)}" autocomplete="off">
-      <div class="hint">和 Code.gs 裡的 TOKEN 相同。</div></div>`;
-    h += `<div class="field"><label for="setName">檢查人</label>
-      <input type="text" id="setName" data-set="inspector" value="${esc(settings.inspector)}" placeholder="例如：王老師" autocomplete="off"></div>`;
-    h += `<div class="actions"><button type="button" class="btn wide" data-act="ping">🔌 測試雲端連線</button></div>`;
-    h += `<p id="pingResult" class="muted small"></p>`;
+    let h = `<div class="sheet-head"><div><div class="eyebrow">使用人：${esc(settings.inspector || '未選擇')}</div><h2 id="sheetTitle">設定</h2></div>${closeBtn}</div>`;
+    if (isTeacher()) {
+      h += `<div class="actions"><button type="button" class="btn btn--primary wide" data-act="roster">👥 人員設定（掃地工作、檢查人）</button></div>`;
+    }
+    h += `<div class="actions"><button type="button" class="btn wide" data-act="who">👤 切換使用人</button></div>`;
     h += `<h3>本次紀錄</h3><p class="muted small" style="margin:0">${state.startedAt
       ? `開始於 ${fmtDateW(new Date(state.startedAt))} ${fmtTime(new Date(state.startedAt))}，將於 ${Math.round(RESET_MS / 3600e3)} 小時後自動清空。`
       : '尚未開始。第一次標記時開始計時。'}<br>等待寫入試算表：${queue.length} 筆</p>`;
     h += `<div class="actions"><button type="button" class="btn btn--danger wide" data-act="reset">立即清空本次紀錄</button></div>`;
     h += `<h3>密碼鎖</h3><p class="muted small" style="margin:0">這支手機已記住密碼。借別人用或換手機時可以鎖定。</p>`;
     h += `<div class="actions"><button type="button" class="btn wide" data-act="lock">🔒 鎖定這支手機</button></div>`;
+    h += `<details class="field"><summary class="muted small">進階：雲端網址</summary>
+      <input type="url" id="setUrl" value="${esc(settings.gasUrl)}" autocomplete="off" style="margin-top:8px">
+      <div class="actions"><button type="button" class="btn wide" data-act="ping">🔌 測試雲端連線</button></div>
+      <p id="pingResult" class="muted small"></p></details>`;
     openSheet({ kind: 'settings' }, h);
   }
   $('#settingsBtn').addEventListener('click', openSettings);
 
   async function settingsAction(act) {
     if (act === 'ping') {
-      document.activeElement?.blur?.();
-      ['setUrl', 'setToken', 'setName'].forEach(id => { const el = $('#' + id); settings[el.dataset.set] = el.value.trim(); });
-      store.set(LS.settings, settings);
+      settings.gasUrl = $('#setUrl').value.trim() || CFG.gasUrl || '';
+      saveSettings();
       const out = $('#pingResult');
       out.textContent = '連線中…';
       try {
@@ -780,8 +791,13 @@
         flush(); retryPhotos();
       } catch (e) { out.textContent = '✕ ' + e.message; }
       updateSync();
+    } else if (act === 'roster') {
+      openRosterEditor();
+    } else if (act === 'who') {
+      openWho();
     } else if (act === 'lock') {
-      try { localStorage.removeItem(LS_PW); } catch { /* ignore */ }
+      settings.token = ''; settings.inspector = '';
+      saveSettings();
       location.reload();
     } else if (act === 'reset') {
       const pendingPhotos = D.items.reduce((n, it) => n + (state.records[it.id]?.photos || []).filter(p => p.st !== 'done').length, 0);
@@ -789,6 +805,109 @@
       if (confirm('確定要清空本次所有紀錄嗎？（已寫入試算表的資料不受影響）' + warn)) resetSession(false);
     }
   }
+
+  // ── 切換使用人 ──
+  const whoOptions = cur => userOptions().map(n => `<option value="${esc(n)}"${n === cur ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  function openWho() {
+    let h = `<div class="sheet-head"><div><h2 id="sheetTitle">使用人是誰？</h2></div>${closeBtn}</div>`;
+    h += `<select id="whoSheetSel" aria-label="使用人">${whoOptions(settings.inspector)}</select>`;
+    h += `<div class="actions"><button type="button" class="btn btn--primary wide" data-act="whoOk">確定</button></div>`;
+    openSheet({ kind: 'who' }, h);
+  }
+  function setUser(name) {
+    settings.inspector = name;
+    saveSettings();
+    $('#userChip').textContent = '👤 ' + name;
+  }
+  $('#userChip').addEventListener('click', openWho);
+
+  // ── 人員設定：下拉選單，已選的人會從其他選單中剔除 ──
+  let students = [];
+  const rosterHead = extra => `<div class="sheet-head"><div>${extra || ''}<h2 id="sheetTitle">人員設定</h2></div>${closeBtn}</div>`;
+  async function openRosterEditor() {
+    openSheet({ kind: 'roster' }, rosterHead() + `<p class="muted">讀取雲端硬碟裡的學生名單中…</p>`);
+    let source = '';
+    try {
+      const r = await api('getStudents');
+      students = r.students; source = r.source;
+    } catch (e) {
+      if (sheetMode?.kind === 'roster') sheetBody.innerHTML = rosterHead() + `<p class="lock-msg">無法讀取名單：${esc(e.message)}</p>`;
+      return;
+    }
+    if (sheetMode?.kind !== 'roster') return;
+    const sel = (key, val) => `<select data-rs="${key}" data-val="${esc(val || '')}" aria-label="選擇同學"></select>`;
+    let h = rosterHead(`<div class="eyebrow">名單來源：${esc(source)}（${students.length} 人）</div>`);
+    h += `<p class="muted small" style="margin:0">每選一位同學，他就會從其他選單中移除。</p>`;
+    h += `<h3>檢查人</h3>`;
+    h += `<div class="rs-row"><div class="rs-label">${esc(D.teacherLabel)}</div><div class="muted small">固定</div></div>`;
+    D.inspectorSlots.forEach(s => {
+      h += `<div class="rs-row"><div class="rs-label">${esc(s.label)}</div><div class="rs-selects">${sel(s.id, inspectorName(s.id))}</div></div>`;
+    });
+    h += `<h3>掃地工作</h3>`;
+    D.jobs.forEach(j => {
+      const cur = roster?.jobs?.[j.id] || [];
+      h += `<div class="rs-row"><div class="rs-label">${esc(jobTitle(j.id))}</div><div class="rs-selects${j.slots > 1 ? ' two' : ''}">`;
+      for (let i = 0; i < j.slots; i++) h += sel(`${j.id}:${i}`, cur[i]);
+      h += `</div></div>`;
+    });
+    h += `<div class="save-bar"><button type="button" class="btn btn--primary" data-act="rosterSave">儲存到雲端</button></div>`;
+    sheetBody.innerHTML = h;
+    renderRosterOptions();
+  }
+  function renderRosterOptions() {
+    const sels = [...sheetBody.querySelectorAll('select[data-rs]')];
+    const taken = new Set(sels.map(s => s.dataset.val).filter(Boolean));
+    sels.forEach(s => {
+      const own = s.dataset.val;
+      let o = `<option value="">— 請選擇 —</option>`;
+      if (own && !students.includes(own)) o += `<option value="${esc(own)}" selected>${esc(own)}（不在名單中）</option>`;
+      students.forEach(n => {
+        if (taken.has(n) && n !== own) return;
+        o += `<option value="${esc(n)}"${n === own ? ' selected' : ''}>${esc(n)}</option>`;
+      });
+      s.innerHTML = o;
+    });
+  }
+  sheetBody.addEventListener('change', e => {
+    const s = e.target.closest('select[data-rs]');
+    if (!s || sheetMode?.kind !== 'roster') return;
+    s.dataset.val = s.value;
+    renderRosterOptions();
+  });
+  async function saveRosterFromEditor(b) {
+    const r = { jobs: {}, inspectors: {}, labels: {} };
+    D.inspectorSlots.forEach(s => { r.labels[s.id] = s.label; r.inspectors[s.id] = ''; });
+    D.jobs.forEach(j => { r.labels[j.id] = jobTitle(j.id); r.jobs[j.id] = Array(j.slots).fill(''); });
+    const sels = [...sheetBody.querySelectorAll('select[data-rs]')];
+    sels.forEach(s => {
+      const [id, i] = s.dataset.rs.split(':');
+      if (i == null) r.inspectors[id] = s.value;
+      else r.jobs[id][+i] = s.value;
+    });
+    const empty = sels.filter(s => !s.value).length;
+    if (empty && !confirm(`還有 ${empty} 個空位沒有選人，確定要儲存嗎？`)) return;
+    b.disabled = true; b.textContent = '儲存中…';
+    try {
+      const res = await api('saveRoster', { roster: r });
+      applyRoster(res.roster);
+      buildMap(); refresh();
+      toast('✓ 人員設定已儲存');
+      closeSheet();
+    } catch (e) {
+      toast('儲存失敗：' + e.message);
+      b.disabled = false; b.textContent = '儲存到雲端';
+    }
+  }
+  sheetBody.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    if (sheetMode?.kind === 'roster' && b.dataset.act === 'rosterSave') saveRosterFromEditor(b);
+    if (sheetMode?.kind === 'who' && b.dataset.act === 'whoOk') {
+      setUser($('#whoSheetSel').value);
+      closeSheet();
+      toast('使用人：' + settings.inspector);
+    }
+  });
 
   // ── Toast ──
   let toastTimer;
@@ -800,48 +919,84 @@
     toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
   }
 
-  // ── 密碼鎖：解開加密名單後才啟動 ──
-  const LS_PW = 'cleanmap.pw.v1';
-  async function unlock(pw) {
-    const roster = await window.RosterCrypto.decrypt(window.ROSTER_ENC, pw);
-    D.items.forEach(it => { it.owners = roster.owners?.[it.id] || []; });
-    D.sections.forEach(s => { s.supervisor = roster.supervisors?.[s.id] || ''; });
-  }
+  // ── 登入：密碼（= 雲端通關密碼）→ 選擇使用人 ──
+  let started = false;
   function start() {
     document.body.classList.remove('locked');
+    $('#userChip').textContent = '👤 ' + settings.inspector;
     buildMap();
     checkExpiry();
     refresh();
     updateSync();
+    if (started) return;
+    started = true;
     flush();
     retryPhotos();
   }
+  async function fetchRoster(token) {
+    const res = await fetch(settings.gasUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'getRoster', token }),
+    });
+    const j = await res.json();
+    if (!j.ok) {
+      const bad = j.code === 'token' || /密碼錯誤/.test(j.error);
+      const err = new Error(bad ? '密碼錯誤' : /未知的動作/.test(j.error) ? '雲端程式還是舊版，請重新部署 Code.gs' : j.error);
+      err.badToken = bad;
+      throw err;
+    }
+    return j.roster;
+  }
+  function showWhoStep() {
+    $('#stepPw').hidden = true;
+    $('#stepWho').hidden = false;
+    $('#whoSel').innerHTML = whoOptions(settings.inspector);
+    $('#lockBtn').textContent = '開始使用';
+    $('#whoSel').focus();
+  }
+  function lockError(msg) {
+    $('#lockMsg').textContent = msg;
+    const card = $('.lock-card');
+    card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+  }
   $('#lock').addEventListener('submit', async e => {
     e.preventDefault();
-    const pw = $('#lockPw').value;
-    const msg = $('#lockMsg');
-    msg.textContent = '';
-    try {
-      await unlock(pw);
-      try { localStorage.setItem(LS_PW, pw); } catch { /* ignore */ }
+    $('#lockMsg').textContent = '';
+    if (!$('#stepWho').hidden) {
+      setUser($('#whoSel').value);
       start();
-    } catch {
-      msg.textContent = '密碼錯誤';
-      const card = $('.lock-card');
-      card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
-      $('#lockPw').select();
-    }
-  });
-  (async () => {
-    if (!window.ROSTER_ENC || !window.crypto?.subtle) {
-      $('#lockMsg').textContent = !window.ROSTER_ENC ? '找不到名單檔 js/roster.enc.js' : '請用 https 網址開啟';
       return;
     }
-    let saved = null;
-    try { saved = localStorage.getItem(LS_PW); } catch { /* ignore */ }
-    if (saved) {
-      try { await unlock(saved); start(); return; }
-      catch { try { localStorage.removeItem(LS_PW); } catch { /* ignore */ } }
+    const pw = $('#lockPw').value.trim();
+    if (!pw) return lockError('請輸入密碼');
+    const btn = $('#lockBtn');
+    btn.disabled = true; btn.textContent = '確認中…';
+    try {
+      applyRoster(await fetchRoster(pw));
+      settings.token = pw;
+      saveSettings();
+      showWhoStep();
+    } catch (err) {
+      lockError(err.badToken ? '密碼錯誤' : (err.message === 'Failed to fetch' ? '連不上網路，請確認網路後再試' : err.message));
+      $('#lockPw').select();
+      btn.textContent = '下一步';
+    }
+    btn.disabled = false;
+  });
+
+  (async () => {
+    if (settings.token && settings.inspector && roster) {
+      // 登入過：先用手機上的名單開啟，再到雲端更新
+      applyRoster(roster);
+      start();
+      try {
+        applyRoster(await fetchRoster(settings.token));
+        buildMap(); refresh();
+      } catch (err) {
+        if (err.badToken) { settings.token = ''; saveSettings(); location.reload(); }
+      }
+      return;
     }
     $('#lockPw').focus();
   })();

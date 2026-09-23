@@ -88,6 +88,20 @@ body.locked > :not(.lock):not(script) { display: none !important; }
 .chip {
   border: 0; border-radius: 999px; padding: 2px 10px; font-size: 13px; font-weight: 600;
 }
+.chip--user { background: #ede7fb; color: var(--accent); }
+select {
+  width: 100%; font: inherit; font-size: 16px; border: 1.5px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; background: var(--surface); color: var(--text); min-height: 46px;
+}
+select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.lock-card select { text-align: center; }
+.rs-row { padding: 10px 0; border-top: 1px solid var(--line); }
+.rs-row:first-of-type { border-top: 0; }
+.rs-label { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.rs-selects { display: grid; gap: 6px; }
+.rs-selects.two { grid-template-columns: 1fr 1fr; }
+.save-bar { position: sticky; bottom: 0; background: var(--surface); padding: 10px 0 4px; margin-top: 8px; border-top: 1px solid var(--line); }
+.save-bar .btn { width: 100%; }
 .chip--issue { background: var(--issue); color: #fff; animation: pulse-chip 1.6s infinite; }
 @keyframes pulse-chip { 0%,100% { box-shadow: 0 0 0 0 rgba(224,49,49,.5); } 50% { box-shadow: 0 0 0 6px rgba(224,49,49,0); } }
 
@@ -112,9 +126,6 @@ main { max-width: 520px; margin: 0 auto; padding: 8px 0 120px; }
  * 橫向：0–26% 東側外（左）、26–74% 走廊、74–100% 西側外（右）
  */
 .map { position: relative; margin: 0 16px; }
-.wall { position: absolute; width: 5px; background: var(--wall); border-radius: 3px; z-index: 2; }
-.wall-E { left: calc(26% - 2.5px); }
-.wall-W { left: calc(74% - 2.5px); }
 .sec {
   position: absolute; left: 26%; width: 48%;
   border: 0; padding: 0; margin: 0; z-index: 1;
@@ -144,9 +155,25 @@ main { max-width: 520px; margin: 0 auto; padding: 8px 0 120px; }
   transition: transform .12s;
 }
 .obj:active { transform: scale(.96); }
-.obj.side-E { left: calc(26% + 3px); }
-.obj.side-W { right: calc(26% + 3px); }
-.obj.side-out-W { left: calc(74% + 8px); }
+.obj.side-E { left: calc(26% + 10px); }
+.obj.side-W { right: calc(26% + 10px); }
+
+/* 兩側紫色長條 = 水泥平台（原本 5px 的三倍粗） */
+.obj--platform {
+  width: 15px; background: var(--wall); border: 0; border-radius: 4px; z-index: 3;
+}
+.obj.side-strip-E { left: calc(26% - 7.5px); }
+.obj.side-strip-W { left: calc(74% - 7.5px); }
+.obj--platform .obj-label { position: absolute; left: 0; right: 0; transform: translateY(-50%); color: #fff; font-size: 10px; text-shadow: none; }
+
+/* 物件名稱（直書） */
+.obj-label {
+  display: block; writing-mode: vertical-rl; text-orientation: upright; letter-spacing: .05em; margin: 0 auto;
+  font-size: 11px; line-height: 1.1; font-weight: 600; color: #2b2b33; pointer-events: none;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff;
+}
+.obj--sink .obj-label { color: #fff; text-shadow: 0 0 2px rgba(0,0,0,.4); }
+.obj--glass, .obj--fountain, .obj--sink { display: flex; align-items: center; justify-content: center; }
 
 .obj--glass {
   width: 10%;
@@ -163,11 +190,6 @@ main { max-width: 520px; margin: 0 auto; padding: 8px 0 120px; }
   background: linear-gradient(to bottom, var(--fountain) 0 calc(50% - .75px), rgba(0,0,0,.55) 0 calc(50% + .75px), var(--fountain) 0);
 }
 .obj--sink { width: 13%; background: var(--sink); }
-.obj--platform {
-  width: 16%; background: rgba(160, 160, 160, .22);
-  border: 2px dashed #7a7a7a; border-radius: 6px;
-  font-size: 11px; color: #555; line-height: 1.15; writing-mode: vertical-rl; letter-spacing: .1em;
-}
 .obj.st-good { outline: 3px solid var(--good); outline-offset: 1px; }
 .obj.st-bad { outline: 3px solid var(--bad); outline-offset: 1px; }
 .obj.st-absent { outline: 3px solid var(--absent); outline-offset: 1px; }
@@ -189,7 +211,8 @@ main { max-width: 520px; margin: 0 auto; padding: 8px 0 120px; }
   border: 2px solid #fff; writing-mode: horizontal-tb; letter-spacing: 0; line-height: 1;
 }
 .side-E .badge { right: -10px; }
-.side-W .badge, .side-out-W .badge { left: -10px; }
+.side-W .badge { left: -10px; }
+.side-strip-E .badge, .side-strip-W .badge { left: -3px; top: -24px; }
 .st-good > .badge, .st-bad > .badge, .st-absent > .badge, .st-partial > .badge { display: grid; }
 .st-good > .badge { background: var(--good); }
 .st-bad > .badge { background: var(--bad); }
@@ -208,9 +231,8 @@ main { max-width: 520px; margin: 0 auto; padding: 8px 0 120px; }
   transform: translateY(-50%); pointer-events: none;
 }
 .annex > * { pointer-events: auto; }
-.annex-E { right: calc(74% + 6px); flex-direction: row-reverse; }
-.annex-W { left: calc(74% + 6px); }
-.annex-out-W { left: calc(74% + 8px); transform: none; }
+.annex-E { right: calc(74% + 12px); flex-direction: row-reverse; }
+.annex-W { left: calc(74% + 12px); }
 .annex-floor { left: 50%; transform: translateX(-50%); }
 .flag {
   width: 26px; height: 26px; border-radius: 50%; background: var(--issue); color: #fff;
@@ -244,10 +266,10 @@ main { max-width: 520px; margin: 0 auto; padding: 8px 0 120px; }
   position: absolute; transform: translateY(-50%); font-size: 13px; font-weight: 700;
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 3px 8px; z-index: 2;
 }
-.landmark.side-E { right: calc(74% + 8px); }
-.landmark.side-W { left: calc(74% + 8px); }
+.landmark.side-E { right: calc(74% + 14px); }
+.landmark.side-W { left: calc(74% + 14px); }
 .sec-tag {
-  position: absolute; left: calc(74% + 8px); right: 0; font-size: 12px; line-height: 1.3; z-index: 2;
+  position: absolute; left: calc(74% + 14px); right: 0; font-size: 12px; line-height: 1.3; z-index: 2;
 }
 .sec-tag b { display: inline-block; font-size: 14px; padding: 1px 8px; border-radius: 6px; margin-bottom: 2px; }
 .sec-tag.pink b { background: var(--pink-deep); }
@@ -269,7 +291,7 @@ main { max-width: 520px; margin: 0 auto; padding: 8px 0 120px; }
 .cp-s { bottom: 3px; left: 50%; transform: translateX(-50%); }
 .cp-e { right: 4px; top: 50%; transform: translateY(-50%); }
 .cp-w { left: 4px; top: 50%; transform: translateY(-50%); }
-.compass-label {
+.compass-label { letter-spacing: .05em;
   position: absolute; left: 50%; bottom: -20px; transform: translateX(-50%);
   font-size: 12px; font-weight: 700; color: var(--accent); background: var(--surface);
   padding: 0 6px; border-radius: 6px; white-space: nowrap;
@@ -404,3 +426,7 @@ textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
 }
+
+/* LINE 綠色按鈕 */
+.btn--line { background: #06c755; border-color: #06c755; color: #fff; font-size: 17px; }
+.btn--line:active { background: #05a948; }

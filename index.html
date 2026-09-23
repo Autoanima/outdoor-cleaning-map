@@ -16,10 +16,16 @@
     <div class="lock-card">
       <div class="lock-icon" aria-hidden="true">🔒</div>
       <h1>外掃區檢查</h1>
-      <p class="muted">請輸入密碼</p>
-      <input id="lockPw" type="password" inputmode="numeric" aria-label="密碼" autofocus>
+      <div id="stepPw">
+        <p class="muted">請輸入密碼</p>
+        <input id="lockPw" type="password" inputmode="numeric" aria-label="密碼" autofocus>
+      </div>
+      <div id="stepWho" hidden>
+        <p class="muted">使用人是誰？</p>
+        <select id="whoSel" aria-label="使用人"></select>
+      </div>
       <p id="lockMsg" class="lock-msg" role="alert"></p>
-      <button class="btn btn--primary" type="submit">開啟</button>
+      <button id="lockBtn" class="btn btn--primary" type="submit">下一步</button>
     </div>
   </form>
 
@@ -37,6 +43,7 @@
       </button>
     </div>
     <div class="topbar-row stats">
+      <button id="userChip" class="chip chip--user" type="button" aria-label="切換使用人"></button>
       <span id="progress" class="progress"></span>
       <button id="issueChip" class="chip chip--issue" type="button" hidden></button>
       <span id="resetInfo" class="muted small"></span>
@@ -60,7 +67,7 @@
       <path d="M50 8 L57 43 L50 50 Z M92 50 L57 57 L50 50 Z M50 92 L43 57 L50 50 Z M8 50 L43 43 L50 50 Z" fill="#fff" opacity=".35"/>
     </svg>
     <span class="cp cp-n">南</span><span class="cp cp-e">西</span><span class="cp cp-s">北</span><span class="cp cp-w">東</span>
-    <span class="compass-label">報表</span>
+    <span class="compass-label">匯出報表</span>
   </button>
 
   <div id="backdrop" class="backdrop" hidden></div>
@@ -85,8 +92,6 @@
 
   <script src="config.js"></script>
   <script src="js/map-data.js"></script>
-  <script src="js/crypto.js"></script>
-  <script src="js/roster.enc.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
