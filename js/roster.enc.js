@@ -1,0 +1,8 @@
+/* 加密的同學名單：請用 tools/roster.html 修改，不要手動編輯 */
+window.ROSTER_ENC = {
+  "v": 1,
+  "iter": 300000,
+  "salt": "txzFdbC9nBIxpqyMXvkKJg==",
+  "iv": "HJg/jOtLC2AtFxcg",
+  "data": "1eaODW08aUldIOzvUYp8A8bZKkEEgfwY9GmE/MZftmK0yXWEeF4KUwTbhgp7HePG2ZvBfuta5iNODLDoWgBh0jHdCE8EmF3eOTRrzxn2H0hrzvyJmFUdYwKlsfrQZxUiMxVe8LdsKKx8Irge9CJ/RnEHZaDVCnP5iSe9g0nT0/W8KETZVEEMQipwwZz6axuTB777+itqhKcMzuETCPkplhweuDSUjyfXc/kqd6Ixi8rsY/T7oUfDTkhH0bTnDyBJz4TycWhdWlXp5K0qc1GWfyeCSdny2PgqfFqCqDD7DUbb2/zg833Nsrh2wkzeIPKXJClaK+XC9Xc31e3UjK+XzKAbhaYwfO71oiTQUaQuJpn7DAz1BBcNfeB9BPYRNtc2gdZxrJ8FpCzOv8ALmuDiPW1VkIlZUKZTAY1d51/WXU3B+reKOQV4jDMiDqnGeMK/rb4GxHruhzl7FuyFr4ybl7qZJmuebFRka72BeMCfp4ShDlmCnfByREkOCTyKfLRqWVSrH2DFD5d1JJTHhRxiKA4P6G6LUP+FlsVSZbLRgTSObOKvLl2JTyW5n5Xt/ye7nRBxEl77g2m8RsXK6JhZcBtA85lg3f6cEKBA9AoNoXbb33RkAk4bvF/l3eHoVe5rebBX8VxUlngYeEYeQVfhjFnDj1Ocl+IFeK3U2mOIlCJln46xamdlYdii/gHf4Mdq+vdj+WTtZFxCPaGHm8dtv3cItY8OKYV3A9r7OecZdw4ziqzOWKoWPv59LxRa+UOhWkAjxcGJrb6N5lrMoEHU6KttQae1VBTQpqZXLRWjsxubAaudAwM7cqySvfUwsxuSLtjPrwzfxqHTMndQM9sKr5jE2x/zTmqOinWdMifAZY20qkmAKqVa68CvO/SmLHLl9oIyK2ml"
+};

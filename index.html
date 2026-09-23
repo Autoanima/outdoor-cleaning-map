@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>外掃區檢查</title>
+  <meta name="description" content="外掃區清潔檢查地圖：點選物件記錄清潔程度、上傳照片、彙整報表。">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="外掃檢查">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%238b5cf6'/%3E%3Cpath d='M32 8l6 24-6 24-6-24z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="locked">
+  <form id="lock" class="lock" autocomplete="off">
+    <div class="lock-card">
+      <div class="lock-icon" aria-hidden="true">🔒</div>
+      <h1>外掃區檢查</h1>
+      <p class="muted">請輸入密碼</p>
+      <input id="lockPw" type="password" inputmode="numeric" aria-label="密碼" autofocus>
+      <p id="lockMsg" class="lock-msg" role="alert"></p>
+      <button class="btn btn--primary" type="submit">開啟</button>
+    </div>
+  </form>
+
+  <header class="topbar">
+    <div class="topbar-row">
+      <div class="title">
+        <h1>外掃區檢查</h1>
+        <span id="dateLabel" class="muted"></span>
+      </div>
+      <button id="syncBtn" class="icon-btn" type="button" aria-label="雲端同步狀態">
+        <span id="syncDot" class="sync-dot"></span>
+      </button>
+      <button id="settingsBtn" class="icon-btn" type="button" aria-label="設定">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.7 7.7 0 0 0 0-2l2-1.6a.5.5 0 0 0 .1-.6l-1.9-3.3a.5.5 0 0 0-.6-.2l-2.4 1a7.3 7.3 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.4h-3.8a.5.5 0 0 0-.5.4l-.4 2.6a7.3 7.3 0 0 0-1.7 1l-2.4-1a.5.5 0 0 0-.6.2L2.5 8.8a.5.5 0 0 0 .1.6l2 1.6a7.7 7.7 0 0 0 0 2l-2 1.6a.5.5 0 0 0-.1.6l1.9 3.3c.1.2.4.3.6.2l2.4-1c.5.4 1.1.7 1.7 1l.4 2.6c0 .2.2.4.5.4h3.8c.3 0 .5-.2.5-.4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.4 1c.2.1.5 0 .6-.2l1.9-3.3a.5.5 0 0 0-.1-.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+      </button>
+    </div>
+    <div class="topbar-row stats">
+      <span id="progress" class="progress"></span>
+      <button id="issueChip" class="chip chip--issue" type="button" hidden></button>
+      <span id="resetInfo" class="muted small"></span>
+    </div>
+  </header>
+
+  <main>
+    <ul class="legend" aria-label="圖例">
+      <li><span class="lg lg--good">✓</span>好</li>
+      <li><span class="lg lg--bad">✕</span>不好</li>
+      <li><span class="lg lg--absent">缺</span>未出席</li>
+      <li><span class="lg lg--issue">!</span>有狀況</li>
+    </ul>
+    <div id="map" class="map" aria-label="外掃區地圖"></div>
+    <p class="foot-hint muted small">點地圖上的物件或地板即可記錄。按右下角指南針彙整報表。</p>
+  </main>
+
+  <button id="compassBtn" class="compass" type="button" aria-label="彙整報表">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M50 8 L57 43 L92 50 L57 57 L50 92 L43 57 L8 50 L43 43 Z" fill="currentColor" opacity=".9"/>
+      <path d="M50 8 L57 43 L50 50 Z M92 50 L57 57 L50 50 Z M50 92 L43 57 L50 50 Z M8 50 L43 43 L50 50 Z" fill="#fff" opacity=".35"/>
+    </svg>
+    <span class="cp cp-n">南</span><span class="cp cp-e">西</span><span class="cp cp-s">北</span><span class="cp cp-w">東</span>
+    <span class="compass-label">報表</span>
+  </button>
+
+  <div id="backdrop" class="backdrop" hidden></div>
+  <section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+    <div class="sheet-grip" aria-hidden="true"></div>
+    <div id="sheetBody" class="sheet-body"></div>
+  </section>
+
+  <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="照片檢視" hidden>
+    <img id="lbImg" alt="">
+    <div class="lb-top">
+      <span id="lbCaption"></span>
+      <button id="lbClose" class="lb-btn" type="button" aria-label="關閉">✕</button>
+    </div>
+    <button id="lbPrev" class="lb-btn lb-nav lb-prev" type="button" aria-label="上一張">‹</button>
+    <button id="lbNext" class="lb-btn lb-nav lb-next" type="button" aria-label="下一張">›</button>
+    <a id="lbDrive" class="lb-drive" target="_blank" rel="noopener" hidden>在雲端硬碟開啟</a>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <input id="fileInput" type="file" accept="image/*" multiple hidden>
+
+  <script src="config.js"></script>
+  <script src="js/map-data.js"></script>
+  <script src="js/crypto.js"></script>
+  <script src="js/roster.enc.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
