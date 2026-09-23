@@ -1,0 +1,12 @@
+{
+  "name": "外掃區檢查",
+  "short_name": "外掃檢查",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f6f3",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "icon_192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" }
+  ]
+}
